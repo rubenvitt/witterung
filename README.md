@@ -4,8 +4,10 @@ Persönliche Wetter-App: ein Aggregator auf dem Homelab kombiniert Apple Weather
 Open-Meteo (mehrere Modelle), Bright Sky/DWD und Pirate Weather und beliefert eine
 SwiftUI-App mit Widgets.
 
-Stand: **M2** – Server komplett (Quellen, Konsens, Jetzt/Nowcast/Warnungen, Push über ntfy,
-Geräte-Anmeldung). iOS-App (M3–M5) und Web-App (M7) entstehen in `ios/` und `web/`.
+Stand: **M0–M7 umgesetzt**: Server (Quellen, Konsens, Jetzt/Nowcast/Warnungen, Push über ntfy,
+Geräte-Anmeldung), iOS-App mit Widgets und Radarkarte ([ios/README.md](ios/README.md)) und
+Web-App unter `/` ([web/README.md](web/README.md)). WeatherKit und Pirate Weather warten auf ihre
+Zugänge.
 API: [docs/api.md](docs/api.md), Format und Quellen: [docs/schema.md](docs/schema.md).
 Plan und Meilensteine: [docs/plan.md](docs/plan.md), Stack-Entscheidung:
 [ADR 0001](docs/adr/0001-backend-stack.md).

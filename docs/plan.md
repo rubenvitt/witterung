@@ -165,6 +165,11 @@ Jeder Meilenstein endet mit einem lauffähigen, getesteten, gepushten Stand.
 | M7 | Webapp (schlanke Ansicht derselben API) | soll |
 | später | Watch, Pollen/Luftqualität, Prognose-Archiv und Quellen-Rückblick | kann |
 
+> **Stand 09.11.2026:** M0–M7 umgesetzt. M2 Server (1bdeda5 ff.), M3/M4/M5 iOS-App mit Widgets und
+> Radar (`ios/`), M5 Radar auch im Web, M6 ntfy auf r-server (`ntfy.rubeen.dev`) mit Push für
+> Warnungen und Regenbeginn, M7 Web-App (`web/`). Offen: WeatherKit- und Pirate-Weather-Zugänge,
+> Anmeldung der App auf dem iPhone (Schlüsselbund-Teilen mit dem Widget erst dann geprüft).
+
 ## 7. Risiken (Pre-Mortem: „Ein Jahr später nutze ich wieder Carrot – warum?“)
 
 1. **Das MVP war zu groß und blieb nach M2 liegen.** Gegenmittel: M0–M2 sind schon
