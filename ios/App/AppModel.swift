@@ -69,8 +69,10 @@ final class AppModel {
     }
 
     func loadPlaces() async {
+        let server = serverURL
         do {
             let fresh = try await api.places()
+            guard server == serverURL else { return } // Server inzwischen gewechselt
             places = fresh
             SharedStore.places = fresh
             if selection == nil || !pages.contains(selection!) { selection = pages.first }
@@ -86,10 +88,12 @@ final class AppModel {
             guard let c = location.coordinate else { return }
             (lat, lon) = (c.latitude, c.longitude)
         }
+        let server = serverURL
         loading.insert(ref)
-        defer { loading.remove(ref) }
         do {
             let (forecast, data) = try await api.forecast(ref, lat: lat, lon: lon)
+            loading.remove(ref)
+            guard server == serverURL else { return } // Server inzwischen gewechselt
             forecasts[ref] = forecast
             failures[ref] = nil
             ForecastCache.store(data, for: ref)
@@ -98,12 +102,18 @@ final class AppModel {
                 WidgetCenter.shared.reloadAllTimelines()
             }
         } catch {
+            loading.remove(ref)
+            guard server == serverURL else { return }
             failures[ref] = error.localizedDescription
             handle(error)
         }
+        // Standort hat sich während des Abrufs geändert: mit dem neuen nachladen.
+        if ref == .current, let c = location.coordinate, c.latitude != lat || c.longitude != lon {
+            await refresh(.current)
+        }
     }
 
-    private func handle(_ error: Error) {
+    func handle(_ error: Error) {
         if let error = error as? APIError, error == .unauthorized || error == .notSignedIn {
             signedIn = false
         }
@@ -183,6 +193,7 @@ final class AppModel {
             places = backup
             placesChanged()
             message = error.localizedDescription
+            handle(error)
         }
     }
 
@@ -198,6 +209,7 @@ final class AppModel {
             places = backup
             placesChanged()
             message = error.localizedDescription
+            handle(error)
         }
     }
 

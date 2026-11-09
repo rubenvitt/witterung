@@ -158,7 +158,7 @@ struct HourlyCard: View {
     let forecast: Forecast
 
     var body: some View {
-        let rows = forecast.hourly
+        let rows = forecast.hourly.filter { $0.at.addingTimeInterval(3600) > .now }
         let showsProbability = rows.contains { ($0.consensus.precipProbPct ?? 0) >= 20 }
         Card(title: "48 Stunden", icon: "clock") {
             ScrollView(.horizontal) {
@@ -280,10 +280,10 @@ struct DailyCard: View {
     let ref: PlaceRef
 
     var body: some View {
-        let days = forecast.daily
+        let days = forecast.daily.filter { $0.date >= Fmt.dayString(.now) }
         let low = days.map { $0.spread.tempMinC?.min ?? $0.consensus.tempMinC }.min() ?? 0
         let high = days.map { $0.spread.tempMaxC?.max ?? $0.consensus.tempMaxC }.max() ?? 10
-        let current = forecast.now.observed?.tempC ?? forecast.now.forecast?.tempC
+        let current = forecast.now.observed?.tempC ?? forecast.currentHour?.tempC
         Card(title: "10 Tage", icon: "calendar") {
             VStack(spacing: 0) {
                 ForEach(Array(days.enumerated()), id: \.element.date) { index, day in
@@ -393,7 +393,7 @@ struct CurrentDetailsCard: View {
 
     var body: some View {
         let o = forecast.now.observed
-        let f = forecast.now.forecast
+        let f = forecast.currentHour
         Card(title: "Aktuell", icon: "thermometer.medium") {
             if let o {
                 Text("Messstation \(o.station) · \(Fmt.distance(meters: o.distanceM)) entfernt · \(Fmt.time(o.at))")

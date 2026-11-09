@@ -67,10 +67,10 @@ enum SourceNames {
 /// Regen in den nächsten 2 Stunden laut Radar-Nowcast.
 enum NowcastSummary: Equatable {
     case none                          // kein Nowcast
-    case dry                           // kein Regen in 2 h
+    case dry(horizon: Int)             // kein Regen bis zum Ende des Nowcasts (Minuten)
     case startsIn(minutes: Int, peak: Double)
     case rainingEndsIn(minutes: Int, peak: Double)
-    case rainingContinues(peak: Double)
+    case rainingContinues(horizon: Int, peak: Double)
 
     /// Ab dieser Intensität gilt ein 5-min-Schritt als Regen.
     static let threshold = 0.1
@@ -90,13 +90,13 @@ enum NowcastSummary: Equatable {
             if let end = points.first(where: { !wet($0) }) {
                 self = .rainingEndsIn(minutes: minutes(end.at), peak: peak)
             } else {
-                self = .rainingContinues(peak: peak)
+                self = .rainingContinues(horizon: minutes(points.last!.at.addingTimeInterval(300)), peak: peak)
             }
         } else if let start = points.firstIndex(where: wet) {
             let peak = points[start...].prefix { wet($0) }.map(\.precipMmH).max() ?? 0
             self = .startsIn(minutes: minutes(points[start].at), peak: peak)
         } else {
-            self = .dry
+            self = .dry(horizon: minutes(points.last!.at.addingTimeInterval(300)))
         }
     }
 
@@ -111,11 +111,16 @@ enum NowcastSummary: Equatable {
     var sentence: String? {
         switch self {
         case .none: nil
-        case .dry: "Kein Regen in den nächsten 2 Stunden"
+        case let .dry(horizon): "Kein Regen in den nächsten \(Self.span(horizon))"
         case let .startsIn(minutes, peak): "\(Self.intensityWord(peak)) in \(minutes) Minuten"
         case let .rainingEndsIn(minutes, peak): "\(Self.intensityWord(peak)) endet in \(minutes) Minuten"
-        case let .rainingContinues(peak): "\(Self.intensityWord(peak)) hält mindestens 2 Stunden an"
+        case let .rainingContinues(horizon, peak): "\(Self.intensityWord(peak)) hält mindestens \(Self.span(horizon)) an"
         }
+    }
+
+    /// „2 Stunden“ bei vollem Nowcast, sonst die tatsächlich abgedeckten Minuten.
+    static func span(_ minutes: Int) -> String {
+        minutes >= 115 ? "2 Stunden" : "\(minutes) Minuten"
     }
 
     var expectsRain: Bool {
@@ -135,6 +140,9 @@ extension Forecast {
         let key = Fmt.dayString(date)
         return daily.first { $0.date == key }
     }
+
+    /// Konsens der Stunde von jetzt (auch aus einem älteren Cache), sonst `now.forecast`.
+    var currentHour: HourPoint? { hour(at: .now)?.consensus ?? now.forecast }
 
     var hasWeatherKit: Bool { sources.contains { $0.source == "weatherkit" && $0.ok } }
 
@@ -203,7 +211,8 @@ struct WeatherSnapshot: Sendable {
     }
 
     static func make(_ forecast: Forecast, at date: Date, placeName: String? = nil) -> WeatherSnapshot? {
-        guard let row = forecast.hour(at: date)?.consensus ?? forecast.now.forecast else { return nil }
+        // Ohne Stundenwert für `date` ist die Vorhersage abgelaufen: lieber „keine Daten“ als alte Werte.
+        guard let row = forecast.hour(at: date)?.consensus else { return nil }
         // Beobachtung gilt, solange sie frisch ist; danach die Prognose der Stunde.
         let observed = forecast.now.observed.flatMap { o in date.timeIntervalSince(o.at) < 90 * 60 ? o : nil }
         let day = forecast.day(at: date)?.consensus

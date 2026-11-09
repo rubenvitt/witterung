@@ -87,15 +87,18 @@ struct API: Sendable {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
+        var token: String?
         if authorized, needsAuth {
-            guard let token = TokenStore.token else { throw APIError.notSignedIn }
+            token = TokenStore.token
+            guard let token else { throw APIError.notSignedIn }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 401 {
-            // Vertrag: 401 → Token verwerfen, neu anmelden.
-            if authorized, needsAuth { TokenStore.delete() }
+            // Vertrag: 401 → Token verwerfen, neu anmelden. Nur dieses Token: Eine späte
+            // Antwort darf kein inzwischen neu ausgestelltes löschen.
+            if let token, TokenStore.token == token { TokenStore.delete() }
             throw APIError.unauthorized
         }
         guard (200..<300).contains(status) else {

@@ -37,12 +37,15 @@ struct NowcastTests {
 
     @Test func dry() {
         #expect(NowcastSummary(Self.nowcast(Array(repeating: 0, count: 25)), now: Self.start).sentence == "Kein Regen in den nächsten 2 Stunden")
-        #expect(NowcastSummary(Self.nowcast([0, 0.05, 0.09]), now: Self.start) == .dry)
+        #expect(NowcastSummary(Self.nowcast([0, 0.05, 0.09]), now: Self.start) == .dry(horizon: 15))
+        // Nur noch 15 min Radar übrig: nicht „2 Stunden“ versprechen.
+        #expect(NowcastSummary(Self.nowcast([0, 0.05, 0.09]), now: Self.start).sentence == "Kein Regen in den nächsten 15 Minuten")
     }
 
     @Test func rainingNow() {
         #expect(NowcastSummary(Self.nowcast([0.3, 0.3, 0.2, 0, 0]), now: Self.start).sentence == "Leichter Regen endet in 15 Minuten")
-        #expect(NowcastSummary(Self.nowcast([5, 6, 8]), now: Self.start).sentence == "Starker Regen hält mindestens 2 Stunden an")
+        #expect(NowcastSummary(Self.nowcast(Array(repeating: 5, count: 25)), now: Self.start).sentence == "Starker Regen hält mindestens 2 Stunden an")
+        #expect(NowcastSummary(Self.nowcast([5, 6, 8]), now: Self.start).sentence == "Starker Regen hält mindestens 15 Minuten an")
     }
 
     @Test func noNowcastOrOutdated() {
@@ -69,6 +72,8 @@ struct NowcastTests {
         #expect(entries[3].temp == forecast.hourly[3].consensus.tempC)
         #expect(entries[0].min == forecast.daily[0].consensus.tempMinC)
         #expect(entries[0].hours.count == 6)
+        // Nach dem letzten Stundenwert gibt es keine Einträge mit alten Werten.
+        #expect(WeatherSnapshot.timeline(forecast, now: Self.start.addingTimeInterval(49 * 3600)).isEmpty)
     }
 }
 

@@ -71,7 +71,7 @@ struct PlacesView: View {
 
     private func row(_ ref: PlaceRef, name: String, icon: String?) -> some View {
         let forecast = model.forecasts[ref]
-        let now = forecast?.now.forecast
+        let now = forecast?.currentHour
         return HStack(spacing: 12) {
             Button {
                 model.selection = ref

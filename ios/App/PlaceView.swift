@@ -51,7 +51,7 @@ struct PlaceView: View {
         .refreshable { await model.refresh(ref, manual: true) }
         .sensoryFeedback(.success, trigger: model.refreshTick)
         .background {
-            Theme.gradient(forecast?.now.forecast?.condition ?? .cloudy, isDay: forecast?.now.forecast?.isDay ?? true)
+            Theme.gradient(forecast?.currentHour?.condition ?? .cloudy, isDay: forecast?.currentHour?.isDay ?? true)
                 .ignoresSafeArea()
         }
         .foregroundStyle(.white)
@@ -86,12 +86,13 @@ private struct HeaderView: View {
     let forecast: Forecast
 
     var body: some View {
-        let now = forecast.now
-        let observed = now.observed.flatMap { Date.now.timeIntervalSince($0.at) < 90 * 60 ? $0 : nil }
-        let temp = observed?.tempC ?? now.forecast?.tempC
-        let condition = now.forecast?.condition ?? observed?.condition ?? .unknown
-        let isDay = now.forecast?.isDay ?? true
-        let today = forecast.daily.first?.consensus
+        // Aus dem Cache: die Stunde von jetzt, nicht die vom Abrufzeitpunkt.
+        let current = forecast.currentHour
+        let observed = forecast.now.observed.flatMap { Date.now.timeIntervalSince($0.at) < 90 * 60 ? $0 : nil }
+        let temp = observed?.tempC ?? current?.tempC
+        let condition = current?.condition ?? observed?.condition ?? .unknown
+        let isDay = current?.isDay ?? true
+        let today = forecast.day(at: .now)?.consensus
 
         VStack(spacing: 2) {
             HStack(spacing: 6) {
@@ -114,7 +115,7 @@ private struct HeaderView: View {
                     .font(.title3)
                     .accessibilityLabel("Höchstwert \(Fmt.temp(today.tempMaxC)), Tiefstwert \(Fmt.temp(today.tempMinC))")
             }
-            if let feels = now.forecast?.feelsLikeC {
+            if let feels = current?.feelsLikeC {
                 Text("Gefühlt \(Fmt.temp(feels))").font(.subheadline).foregroundStyle(.secondary)
             }
         }

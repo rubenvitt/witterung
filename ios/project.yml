@@ -93,7 +93,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDevelopmentRegion: de
-        NSWidgetUsesLocation: true
+        NSWidgetWantsLocation: true
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSExtension:

@@ -93,6 +93,7 @@ struct RadarView: View {
             index = info.lastMeasured
         } catch {
             self.error = error.localizedDescription
+            model.handle(error)
         }
     }
 

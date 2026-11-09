@@ -57,8 +57,8 @@ struct RootView: View {
     /// Hintergrund der gewählten Seite, damit der Rand beim Blättern nicht schwarz blitzt.
     private var background: some View {
         let f = model.selection.flatMap { model.forecasts[$0] }
-        let condition = f?.now.forecast?.condition ?? .cloudy
-        return Theme.gradient(condition, isDay: f?.now.forecast?.isDay ?? true)
+        let condition = f?.currentHour?.condition ?? .cloudy
+        return Theme.gradient(condition, isDay: f?.currentHour?.isDay ?? true)
             .animation(.easeInOut(duration: 0.6), value: model.selection)
     }
 
