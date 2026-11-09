@@ -6,13 +6,14 @@ struct RootView: View {
     @State private var showPlaces = false
     @State private var showSettings = false
     @State private var radarFor: PlaceRef?
+    @State private var path = NavigationPath()
 
     var body: some View {
         @Bindable var model = model
         if !model.signedIn {
             SignInView()
         } else {
-            NavigationStack {
+            NavigationStack(path: $path) {
                 ZStack {
                     background.ignoresSafeArea()
                     if model.pages.isEmpty {
@@ -36,6 +37,9 @@ struct RootView: View {
             .sheet(isPresented: $showPlaces) { PlacesView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .fullScreenCover(item: $radarFor) { ref in RadarView(ref: ref) }
+            #if DEBUG
+            .task { await openDebugScreen() }
+            #endif
             .alert("Fehler", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -94,6 +98,37 @@ struct RootView: View {
         .background(.ultraThinMaterial.opacity(0.8))
     }
 }
+
+#if DEBUG
+extension RootView {
+    /// Screenshots ohne UI-Automation: `-page 1 -screen radar|places|settings|comparison|days|attribution`.
+    private func openDebugScreen() async {
+        try? await Task.sleep(for: .seconds(2)) // Orte vom Server abwarten
+        if let page = DebugArgs.value("-page").flatMap(Int.init), model.pages.indices.contains(page) {
+            model.selection = model.pages[page]
+        }
+        guard let screen = DebugArgs.value("-screen"), let ref = model.selection else { return }
+        try? await Task.sleep(for: .seconds(1))
+        switch screen {
+        case "radar": radarFor = ref
+        case "places": showPlaces = true
+        case "settings": showSettings = true
+        case "comparison": path.append(ComparisonRoute(ref: ref))
+        case "days": path.append(ComparisonRoute(ref: ref, day: model.forecasts[ref]?.daily.dropFirst().first?.date))
+        case "attribution": path.append(AttributionRoute(ref: ref))
+        default: break
+        }
+    }
+}
+
+enum DebugArgs {
+    static func value(_ name: String) -> String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+        return args[i + 1]
+    }
+}
+#endif
 
 private struct PageDots: View {
     let pages: [PlaceRef]

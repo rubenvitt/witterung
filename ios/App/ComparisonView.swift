@@ -95,7 +95,7 @@ struct ComparisonView: View {
                            parts: [row.spread.tempC.map { "Temp. \(Fmt.temp($0.min))–\(Fmt.temp($0.max))" },
                                    row.spread.precipMm.map { "Regen \(Fmt.number($0.min))–\(Fmt.mm($0.max))" },
                                    row.spread.windKmh.map { "Wind \(Int($0.min.rounded()))–\(Fmt.kmh($0.max))" }],
-                           agreement: row.spread.precipAgreementPct)
+                           agreement: row.spread.precipAgreementPct, threshold: "0,1 mm")
             }
         } header: {
             Text("Werte je Quelle")
@@ -125,7 +125,7 @@ struct ComparisonView: View {
                            parts: [row.spread.tempMinC.map { "Tief \(Fmt.temp($0.min))–\(Fmt.temp($0.max))" },
                                    row.spread.tempMaxC.map { "Hoch \(Fmt.temp($0.min))–\(Fmt.temp($0.max))" },
                                    row.spread.precipMm.map { "Regen \(Fmt.number($0.min))–\(Fmt.mm($0.max))" }],
-                           agreement: row.spread.precipAgreementPct)
+                           agreement: row.spread.precipAgreementPct, threshold: "1 mm")
                 if let sunrise = row.consensus.sunrise, let sunset = row.consensus.sunset {
                     Label("Sonne \(Fmt.time(sunrise))–\(Fmt.time(sunset))", systemImage: "sunrise")
                         .font(.footnote)
@@ -140,12 +140,12 @@ struct ComparisonView: View {
         Cells(symbol: p.condition.symbol(), values: [Fmt.temp(p.tempMinC), Fmt.temp(p.tempMaxC), Fmt.mm(p.precipMm)])
     }
 
-    private func spreadLine(n: Int, parts: [String?], agreement: Double?) -> some View {
+    private func spreadLine(n: Int, parts: [String?], agreement: Double?, threshold: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Spannbreite aus \(n) Quellen").font(.footnote.weight(.semibold))
             Text(parts.compactMap { $0 }.joined(separator: " · ")).font(.footnote)
             if let agreement {
-                Text("\(Fmt.percent(agreement)) der Quellen erwarten Niederschlag").font(.footnote)
+                Text("\(Fmt.percent(agreement)) der Quellen erwarten mindestens \(threshold) Niederschlag").font(.footnote)
             }
         }
         .foregroundStyle(.secondary)

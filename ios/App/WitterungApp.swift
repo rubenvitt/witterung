@@ -2,8 +2,16 @@ import SwiftUI
 
 @main
 struct WitterungApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        #if DEBUG
+        // Simulator/Screenshots: `-server http://127.0.0.1:8081` setzt den Server ohne Tippen.
+        if let url = DebugArgs.value("-server").flatMap(URL.init(string:)) { SharedStore.serverURL = url }
+        #endif
+        _model = State(initialValue: AppModel())
+    }
 
     var body: some Scene {
         WindowGroup {

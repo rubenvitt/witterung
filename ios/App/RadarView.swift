@@ -81,7 +81,8 @@ struct RadarView: View {
         }
         .padding(14)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 30) // Platz für den Rechtshinweis von Apple Karten
     }
 
     private func load() async {

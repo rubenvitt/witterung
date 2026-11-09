@@ -37,6 +37,7 @@ def forecast(name, kind, place_id):
     berlin_today = (now + timedelta(hours=1)).date()  # MEZ genügt für den Mock
     doc = shifted(json.loads(FIXTURE.read_text()), delta, berlin_today - date(2026, 11, 9), nowcast_delta)
     doc["location"].update({"id": place_id, "name": name, "kind": kind})
+    doc["generated_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     return doc
 
 

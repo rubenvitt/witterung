@@ -16,6 +16,7 @@ struct PlaceView: View {
 
     var body: some View {
         let forecast = model.forecasts[ref]
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(spacing: 12) {
                 if let forecast {
@@ -23,9 +24,9 @@ struct PlaceView: View {
                     FreshnessBadge(forecast: forecast, failure: model.failures[ref], loading: model.loading.contains(ref))
                     ForEach(forecast.alerts) { AlertCard(alert: $0) }
                     NowcastCard(forecast: forecast)
-                    HourlyCard(forecast: forecast)
-                    DailyCard(forecast: forecast, ref: ref)
-                    CurrentDetailsCard(forecast: forecast)
+                    HourlyCard(forecast: forecast).id("hourly")
+                    DailyCard(forecast: forecast, ref: ref).id("daily")
+                    CurrentDetailsCard(forecast: forecast).id("details")
                     SourcesCard(forecast: forecast, ref: ref)
                     AttributionFooter(forecast: forecast, ref: ref)
                 } else {
@@ -37,6 +38,16 @@ struct PlaceView: View {
             .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
+        #if DEBUG
+        .task(id: forecast == nil) {
+            // Screenshots: `-scrollTo daily` springt zu einem Abschnitt.
+            if forecast != nil, let target = DebugArgs.value("-scrollTo") {
+                try? await Task.sleep(for: .milliseconds(300))
+                proxy.scrollTo(target, anchor: .top)
+            }
+        }
+        #endif
+        }
         .refreshable { await model.refresh(ref, manual: true) }
         .sensoryFeedback(.success, trigger: model.refreshTick)
         .background {

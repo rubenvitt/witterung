@@ -3,7 +3,7 @@ import Testing
 
 struct PKCETests {
     @Test func rfc7636AppendixB() {
-        #expect(PKCE.challenge(for: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk") == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuxlBB2-jkM")
+        #expect(PKCE.challenge(for: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk") == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
     }
 
     @Test func verifierFormat() {
@@ -113,6 +113,7 @@ struct FormattingTests {
         let date = NowcastTests.start.addingTimeInterval(20 * 60) // 12:20Z = 13:20 MEZ
         #expect(Fmt.time(date) == "13:20")
         #expect(Fmt.hour(date) == "13 Uhr")
+        #expect(Fmt.time(NowcastTests.start.addingTimeInterval(-7 * 3600)) == "06:00")
         #expect(Fmt.dayString(Date(timeIntervalSince1970: 1_794_265_200)) == "2026-11-10") // 23:00Z = 00:00 MEZ
         #expect(Fmt.weekday("2026-11-10", now: NowcastTests.start) == "Di")
         #expect(Fmt.weekday("2026-11-09", now: NowcastTests.start) == "Heute")

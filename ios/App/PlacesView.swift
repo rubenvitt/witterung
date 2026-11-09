@@ -84,7 +84,7 @@ struct PlacesView: View {
                             Text(name).font(.headline)
                         }
                         if let now {
-                            Text(now.condition.label(isDay: now.isDay ?? true)).font(.subheadline).foregroundStyle(.secondary)
+                            Text(now.condition.label(isDay: now.isDay ?? true)).font(.subheadline).opacity(0.8)
                         }
                     }
                     Spacer()
@@ -101,14 +101,16 @@ struct PlacesView: View {
                     Task { await model.toggleNotify(place) }
                 } label: {
                     Image(systemName: place.notify ? "bell.fill" : "bell.slash")
-                        .foregroundStyle(place.notify ? Color.accentColor : .secondary)
+                        .foregroundStyle(forecast == nil ? AnyShapeStyle(place.notify ? Color.accentColor : .secondary) : AnyShapeStyle(.white.opacity(place.notify ? 1 : 0.6)))
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel(place.notify ? "Mitteilungen für \(place.name) ausschalten" : "Mitteilungen für \(place.name) einschalten")
                 .sensoryFeedback(.selection, trigger: place.notify)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
+        .foregroundStyle(forecast == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.white))
+        .listRowBackground(now.map { Theme.gradient($0.condition, isDay: $0.isDay ?? true) })
     }
 }
 

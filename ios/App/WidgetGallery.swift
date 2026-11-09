@@ -8,20 +8,24 @@ struct WidgetGallery: View {
     var body: some View {
         let forecast = ForecastCache.load(.saved(SharedStore.places.first?.id ?? 1)) ?? ForecastCache.load(.current)
         let snapshot = forecast.flatMap { WeatherSnapshot.make($0, at: .now) }
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(spacing: 18) {
                 HStack(spacing: 18) {
                     tile(snapshot, .systemSmall, CGSize(width: 170, height: 170))
-                    VStack(spacing: 12) {
-                        lock(snapshot, .accessoryCircular, CGSize(width: 76, height: 76))
-                        lock(snapshot, .accessoryInline, CGSize(width: 170, height: 22))
-                    }
+                    lock(snapshot, .accessoryCircular, CGSize(width: 76, height: 76))
                 }
                 tile(snapshot, .systemMedium, CGSize(width: 364, height: 170))
-                lock(snapshot, .accessoryRectangular, CGSize(width: 172, height: 76))
-                tile(snapshot, .systemLarge, CGSize(width: 364, height: 382))
+                HStack(spacing: 18) {
+                    lock(snapshot, .accessoryRectangular, CGSize(width: 172, height: 76))
+                    Spacer()
+                }
+                lock(snapshot, .accessoryInline, CGSize(width: 330, height: 24))
+                tile(snapshot, .systemLarge, CGSize(width: 364, height: 382)).id("large")
             }
             .padding()
+        }
+        .onAppear { if DebugArgs.value("-widgetGallery") == "large" { proxy.scrollTo("large", anchor: .bottom) } }
         }
         .background(Color(white: 0.12).ignoresSafeArea())
         .environment(\.colorScheme, .dark)

@@ -159,11 +159,12 @@ struct HourlyCard: View {
 
     var body: some View {
         let rows = forecast.hourly
+        let showsProbability = rows.contains { ($0.consensus.precipProbPct ?? 0) >= 20 }
         Card(title: "48 Stunden", icon: "clock") {
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(Array(rows.enumerated()), id: \.element.at) { index, row in
-                        HourColumn(row: row, isFirst: index == 0)
+                        HourColumn(row: row, isFirst: index == 0, showsProbability: showsProbability)
                     }
                 }
                 .padding(.vertical, 4)
@@ -180,6 +181,7 @@ struct HourlyCard: View {
 private struct HourColumn: View {
     let row: HourRow
     let isFirst: Bool
+    let showsProbability: Bool
 
     var body: some View {
         let c = row.consensus
@@ -192,9 +194,11 @@ private struct HourColumn: View {
                 .symbolRenderingMode(.multicolor)
                 .font(.title3)
                 .frame(height: 26)
-            Text(c.precipProbPct.map { $0 >= 20 ? Fmt.percent($0) : " " } ?? " ")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.cyan)
+            if showsProbability {
+                Text(c.precipProbPct.map { $0 >= 20 ? Fmt.percent($0) : " " } ?? " ")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.cyan)
+            }
             Text(Fmt.temp(c.tempC)).font(.body.weight(.medium))
         }
         .frame(minWidth: 44)
@@ -209,14 +213,16 @@ private struct HourlyChart: View {
 
     var body: some View {
         let temps = rows.flatMap { [$0.spread.tempC?.min ?? $0.consensus.tempC, $0.spread.tempC?.max ?? $0.consensus.tempC] }
-        let low = (temps.min() ?? 0).rounded(.down) - 1
         let high = (temps.max() ?? 10).rounded(.up) + 1
-        let precipMax = max(2, rows.map { $0.spread.precipMm?.max ?? $0.consensus.precipMm }.max() ?? 0)
-        // Niederschlag unten im selben Diagramm: auf das untere Drittel der Temperaturskala abgebildet.
-        let scale = (high - low) / 3 / precipMax
+        let wettest = rows.map(\.consensus.precipMm).max() ?? 0
+        // Niederschlag unten im selben Diagramm, auf das untere Drittel der Temperaturskala
+        // abgebildet; ganz ohne Regen bekommt die Temperatur die volle Höhe.
+        let rawLow = (temps.min() ?? 0).rounded(.down) - 1
+        let low = wettest > 0 ? rawLow - (high - rawLow) / 2 : rawLow
+        let scale = (high - low) / 3 / max(2, wettest)
 
         Chart {
-            ForEach(rows) { row in
+            ForEach(rows.filter { $0.consensus.precipMm > 0 }) { row in
                 BarMark(x: .value("Zeit", row.at, unit: .hour),
                         yStart: .value("mm", low),
                         yEnd: .value("mm", low + row.consensus.precipMm * scale))
@@ -248,7 +254,7 @@ private struct HourlyChart: View {
         .chartYAxis {
             AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
                 AxisGridLine().foregroundStyle(.white.opacity(0.15))
-                AxisValueLabel { if let v = value.as(Double.self), v >= low + (high - low) / 3 { Text(Fmt.temp(v)) } }
+                AxisValueLabel { if let v = value.as(Double.self), v >= rawLow { Text(Fmt.temp(v)) } }
             }
         }
         .chartXAxis {

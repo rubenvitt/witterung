@@ -35,7 +35,9 @@ enum Fmt {
 
     /// „14:20“
     static func time(_ date: Date) -> String {
-        date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: timeZone))
+        date.formatted(Date.VerbatimFormatStyle(
+            format: "\(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits)",
+            locale: locale, timeZone: timeZone, calendar: calendar))
     }
 
     /// „14 Uhr“
