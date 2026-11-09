@@ -1,0 +1,5 @@
+# Xcode-Projekt entsteht aus project.yml (xcodegen generate)
+Witterung.xcodeproj/
+DerivedInfo/
+xcuserdata/
+build/
