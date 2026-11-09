@@ -111,16 +111,21 @@ enum NowcastSummary: Equatable {
     var sentence: String? {
         switch self {
         case .none: nil
-        case let .dry(horizon): "Kein Regen in den nächsten \(Self.span(horizon))"
+        case let .dry(horizon): "Kein Regen in \(Self.span(horizon) == "1 Stunde" ? "der nächsten Stunde" : "den nächsten \(Self.span(horizon))")"
         case let .startsIn(minutes, peak): "\(Self.intensityWord(peak)) in \(minutes) Minuten"
         case let .rainingEndsIn(minutes, peak): "\(Self.intensityWord(peak)) endet in \(minutes) Minuten"
         case let .rainingContinues(horizon, peak): "\(Self.intensityWord(peak)) hält mindestens \(Self.span(horizon)) an"
         }
     }
 
-    /// „2 Stunden“ bei vollem Nowcast, sonst die tatsächlich abgedeckten Minuten.
+    /// Abgedeckte Zeit, abgerundet auf eine Angabe, die stimmt: „2 Stunden“ nur bei vollem Nowcast.
     static func span(_ minutes: Int) -> String {
-        minutes >= 115 ? "2 Stunden" : "\(minutes) Minuten"
+        switch minutes {
+        case 115...: "2 Stunden"
+        case 90...: "1½ Stunden"
+        case 60...: "1 Stunde"
+        default: "\(minutes) Minuten"
+        }
     }
 
     var expectsRain: Bool {

@@ -46,6 +46,8 @@ struct NowcastTests {
         #expect(NowcastSummary(Self.nowcast([0.3, 0.3, 0.2, 0, 0]), now: Self.start).sentence == "Leichter Regen endet in 15 Minuten")
         #expect(NowcastSummary(Self.nowcast(Array(repeating: 5, count: 25)), now: Self.start).sentence == "Starker Regen hält mindestens 2 Stunden an")
         #expect(NowcastSummary(Self.nowcast([5, 6, 8]), now: Self.start).sentence == "Starker Regen hält mindestens 15 Minuten an")
+        #expect(NowcastSummary(Self.nowcast(Array(repeating: 0, count: 21)), now: Self.start).sentence == "Kein Regen in den nächsten 1½ Stunden")
+        #expect(NowcastSummary(Self.nowcast(Array(repeating: 0, count: 13)), now: Self.start).sentence == "Kein Regen in der nächsten Stunde")
     }
 
     @Test func noNowcastOrOutdated() {
