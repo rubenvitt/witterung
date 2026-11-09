@@ -4,8 +4,9 @@ Persönliche Wetter-App: ein Aggregator auf dem Homelab kombiniert Apple Weather
 Open-Meteo (mehrere Modelle), Bright Sky/DWD und Pirate Weather und beliefert eine
 SwiftUI-App mit Widgets.
 
-Stand: **M1** (vier Quellen-Adapter, Kontingente, Poller, Rohdaten-API).
-Format und Quellen: [docs/schema.md](docs/schema.md).
+Stand: **M2** – Server komplett (Quellen, Konsens, Jetzt/Nowcast/Warnungen, Push über ntfy,
+Geräte-Anmeldung). iOS-App (M3–M5) und Web-App (M7) entstehen in `ios/` und `web/`.
+API: [docs/api.md](docs/api.md), Format und Quellen: [docs/schema.md](docs/schema.md).
 Plan und Meilensteine: [docs/plan.md](docs/plan.md), Stack-Entscheidung:
 [ADR 0001](docs/adr/0001-backend-stack.md).
 
@@ -62,10 +63,16 @@ Open-Meteo und Bright Sky laufen ohne Zugang. Für WeatherKit den `.p8`-Schlüss
 `./secrets/weatherkit.p8:/run/secrets/weatherkit.p8:ro` einhängen und die vier Variablen
 setzen. Ein kaputter Schlüssel lässt den Server gar nicht erst starten.
 
-Orte anlegen (bis die App da ist), mit Sitzungs-Cookie aus dem Browser:
+Orte und Push lassen sich in der App bzw. Web-App einstellen; ohne Oberfläche geht es auf
+dem Server per `docker exec`:
 
 ```fish
-curl -X POST https://witterung.rubeen.dev/api/v1/places -H 'X-Witterung-Client: cli' \
-  -H 'Content-Type: application/json' -b "witterung_session=…" \
-  -d '{"name":"Uelzen","lat":52.9656,"lon":10.5594}'
+docker exec witterung witterung place-add Uelzen 52.9656 10.5594 notify
+# ntfy (läuft als eigener Dienst ~/server/ntfy, Zugangsdaten dort in credentials.txt):
+grep '^token:' ~/server/ntfy/credentials.txt | cut -d' ' -f2 | tr -d '\n' \
+  | docker exec -i witterung witterung notify-set http://ntfy:80 witterung
 ```
+
+Push kommt über die ntfy-App (Server `https://ntfy.rubeen.dev`, Topic `witterung`, Konto
+`iphone` aus `credentials.txt`): neue DWD-Warnung ab Stufe 2 und Regen in < 30 min laut Radar,
+für Orte mit `notify`. Die Datenbank wird nachts nach `data/backups/` gesichert (7 Tage).

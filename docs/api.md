@@ -96,7 +96,9 @@ sobald WeatherKit aktiv ist).
 ## Radar-Karte
 
 `GET /api/v1/radar` → `{"wms": "https://maps.dwd.de/geoserver/dwd/wms", "layer":
-"dwd:Radar_rv_product_1x1km_ger", "frames": ["2026-11-09T10:00:00Z", …]}` – Zeitschritte
+"dwd:Radar_rv_product_1x1km_ger", "frames": ["2026-11-09T10:00:00Z", …], "now_index": 24,
+"attribution": "Radar: Deutscher Wetterdienst"}` – `now_index` ist das letzte Analysebild,
+danach Vorhersage. Zeitschritte
 (5 min) von −2 h bis +2 h (Vorhersage), für WMS-`TIME`. Kacheln holt der Client direkt beim
 DWD (EPSG:3857, `FORMAT=image/png`, `TRANSPARENT=true`). Quelle: Deutscher Wetterdienst.
 
