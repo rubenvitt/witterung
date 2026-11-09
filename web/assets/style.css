@@ -500,6 +500,7 @@ table.data { border-collapse: separate; border-spacing: 0; font-size: 0.85rem; w
   .radar-controls { grid-template-columns: auto 1fr; }
   .frame-label { grid-column: 1 / -1; text-align: left; min-width: 0; }
   .place-row { grid-template-columns: 1fr auto; }
-  .place-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .place-main { grid-row: span 2; }
+  .place-row .switch { justify-self: end; }
 }
 .grid-rain { stroke: var(--rain-light); stroke-dasharray: 2 4; }
