@@ -14,16 +14,24 @@ export async function renderWeather(root, param) {
     try {
       const fc = await loadForecast(key, force);
       if (!body.isConnected) return;
-      // replaceChildren would print null as text: drop empty sections.
+      const empty = !fc.now?.observed && !fc.now?.forecast && !fc.hourly?.length && !fc.daily?.length;
+      // replaceChildren would turn a null into the text "null".
       body.replaceChildren(...[
         header(fc),
         alerts(fc.alerts ?? []),
-        nowCard(fc),
-        nowcastCard(fc.nowcast),
-        hourlyCard(fc.hourly ?? []),
-        dailyCard(fc.daily ?? []),
+        empty
+          ? h('div', { class: 'card' },
+            h('p', null, 'Für diesen Ort liegen noch keine Wetterdaten vor.'),
+            h('p', { class: 'muted small' }, 'Der Server ruft die Quellen gerade ab; das dauert für einen neuen Ort bis zu einer Minute.'),
+            h('button', { type: 'button', class: 'btn', onclick: () => load(true) }, icon('refresh'), 'Erneut laden'))
+          : [
+            nowCard(fc),
+            nowcastCard(fc.nowcast),
+            hourlyCard(fc.hourly ?? []),
+            dailyCard(fc.daily ?? []),
+          ],
         attributionBlock(fc),
-      ].filter(Boolean));
+      ].flat().filter(Boolean));
       for (const draw of body.querySelectorAll('[data-chart]')) registerChart(draw.chartDraw);
     } catch (err) {
       if (err.status !== 401) body.replaceChildren(errorBox(err, () => load(true)));
@@ -133,7 +141,8 @@ const RAIN_MIN = 0.1; // mm/h
 
 export function nowcastSummary(points, now = Date.now()) {
   const future = points.filter((p) => new Date(p.at) >= now - 5 * 60000);
-  if (!future.length) return 'Keine Radardaten für die nächsten Stunden.';
+  if (!future.length) return 'Keine aktuellen Radardaten.';
+  const until = `${time(future[future.length - 1].at)} Uhr`;
   const rainingNow = future[0].precip_mm_h >= RAIN_MIN;
   const switchAt = future.find((p) => (p.precip_mm_h >= RAIN_MIN) !== rainingNow);
   const max = Math.max(...future.map((p) => p.precip_mm_h));
@@ -141,15 +150,16 @@ export function nowcastSummary(points, now = Date.now()) {
   if (rainingNow) {
     return switchAt
       ? `Es regnet. Ende gegen ${time(switchAt.at)} Uhr (in ${mins(switchAt)} min).`
-      : `Es regnet und hört in den nächsten 2 Stunden nicht auf (bis ${num(max, 1)} mm/h).`;
+      : `Es regnet und hört bis ${until} nicht auf (bis ${num(max, 1)} mm/h).`;
   }
-  if (!switchAt) return 'Kein Regen in den nächsten 2 Stunden.';
+  if (!switchAt) return `Kein Regen bis ${until}.`;
   return `Regen ab ${time(switchAt.at)} Uhr (in ${mins(switchAt)} min), bis ${num(max, 1)} mm/h.`;
 }
 
 function nowcastCard(nc) {
-  if (!nc?.points?.length) return null;
-  const points = nc.points;
+  // Only what is still ahead; the radar series may begin in the past.
+  const points = (nc?.points ?? []).filter((p) => new Date(p.at) >= Date.now() - 5 * 60000);
+  if (!points.length) return null;
   const summary = nowcastSummary(points);
   const wrap = h('div', { class: 'chart chart-nowcast' });
   wrap.dataset.chart = '';
@@ -161,7 +171,7 @@ function nowcastCard(nc) {
     const y = (v) => T + ph - (v / max) * ph;
     const t0 = new Date(points[0].at).getTime();
     const nowX = L + ((Date.now() - t0) / (5 * 60000)) * slot;
-    const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': `Radar-Niederschlag der nächsten 2 Stunden. ${summary}` },
+    const svg = s('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': `Radar-Niederschlag bis ${time(points[points.length - 1].at)} Uhr. ${summary}` },
       [0, max / 2, max].map((v) => [
         s('line', { class: 'grid', x1: L, x2: L + pw, y1: y(v), y2: y(v) }),
         s('text', { class: 'axis', x: L + pw + 4, y: y(v) + 4 }, `${num(v, v < 10 ? 1 : 0)}`),
@@ -179,7 +189,7 @@ function nowcastCard(nc) {
   };
   return h('section', { class: 'card', 'aria-labelledby': 'nc-h' },
     h('div', { class: 'card-head' },
-      h('h2', { id: 'nc-h' }, 'Nächste 2 Stunden'),
+      h('h2', { id: 'nc-h' }, 'Regen in Kürze'),
       h('span', { class: 'muted small' }, `${sourceName(nc.source)}, ${relative(nc.at)}`)),
     h('p', { class: 'nowcast-summary' }, icon('drop', 'inline-icon'), summary),
     wrap);
