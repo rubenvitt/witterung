@@ -14,7 +14,7 @@ getrandom = "0.3"
 hmac = "0.12"
 jiff = { version = "0.2.41", features = ["serde", "tzdb-bundle-always"] }
 jsonwebtoken = "9"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
 ring = "0.17"
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

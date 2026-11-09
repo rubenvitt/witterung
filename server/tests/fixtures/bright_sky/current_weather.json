@@ -1,0 +1,63 @@
+{
+  "weather": {
+    "source_id": 9257,
+    "timestamp": "2026-11-09T13:30:00+01:00",
+    "cloud_cover": 50,
+    "condition": "dry",
+    "dew_point": 4.35,
+    "solar_10": null,
+    "solar_30": null,
+    "solar_60": null,
+    "precipitation_10": 0.0,
+    "precipitation_30": 0.0,
+    "precipitation_60": 0.0,
+    "pressure_msl": 1020.2,
+    "relative_humidity": 77,
+    "visibility": 15380,
+    "wind_direction_10": 150,
+    "wind_direction_30": 150,
+    "wind_direction_60": 150,
+    "wind_speed_10": 14.4,
+    "wind_speed_30": 14.4,
+    "wind_speed_60": 14.4,
+    "wind_gust_direction_10": 140,
+    "wind_gust_direction_30": 140,
+    "wind_gust_direction_60": 150,
+    "wind_gust_speed_10": 13.7,
+    "wind_gust_speed_30": 13.7,
+    "wind_gust_speed_60": 16.9,
+    "sunshine_30": null,
+    "sunshine_60": null,
+    "temperature": 8.2,
+    "icon": "partly-cloudy-day"
+  },
+  "sources": [
+    {
+      "id": 9257,
+      "observation_type": "synop",
+      "station_name": "Uelzen",
+      "wmo_station_id": "E475",
+      "distance": 3383,
+      "lat": 52.9414,
+      "lon": 10.5289
+    },
+    {
+      "id": 362394,
+      "observation_type": "synop",
+      "station_name": "Fassberg",
+      "wmo_station_id": "10246",
+      "distance": 25495,
+      "lat": 52.9157,
+      "lon": 10.1885
+    },
+    {
+      "id": 11682,
+      "observation_type": "synop",
+      "station_name": "Luechow",
+      "wmo_station_id": "10253",
+      "distance": 38758,
+      "lat": 52.9724,
+      "lon": 11.1374
+    }
+  ]
+}

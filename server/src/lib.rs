@@ -3,11 +3,14 @@
 pub mod api;
 pub mod app;
 pub mod auth;
+pub mod backup;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod forecast;
 pub mod healthcheck;
 pub mod poller;
+pub mod push;
 pub mod quota;
 pub mod sources;
 
@@ -35,12 +38,34 @@ pub fn build(config: Config, http: reqwest::Client) -> anyhow::Result<(App, Rout
             "/api/v1/places",
             get(api::list_places).post(api::create_place),
         )
+        .route(
+            "/api/v1/places/{id}",
+            axum::routing::patch(api::update_place).delete(api::delete_place),
+        )
         .route("/api/v1/places/{id}/raw", get(api::raw))
+        .route("/api/v1/places/{id}/forecast", get(api::place_forecast))
+        .route("/api/v1/forecast", get(api::location_forecast))
+        .route("/api/v1/status", get(api::status))
+        .route("/api/v1/radar", get(api::radar))
+        .route("/api/v1/devices", get(api::list_devices))
+        .route(
+            "/api/v1/settings/notifications",
+            get(push::get_settings).put(push::put_settings),
+        )
+        .route(
+            "/api/v1/settings/notifications/test",
+            axum::routing::post(push::test),
+        )
+        .route(
+            "/api/v1/devices/{id}",
+            axum::routing::delete(api::delete_device),
+        )
         .route_layer(middleware::from_fn_with_state(app.clone(), require_auth));
     let router = Router::new()
         .route("/", get(index))
         .route("/health", get(health))
         .merge(auth::routes::routes())
+        .merge(auth::device::routes())
         .merge(api)
         .with_state(app.clone());
     Ok((app, router))
@@ -79,10 +104,41 @@ async fn shutdown_signal() {
     tokio::select! { _ = ctrl_c => {}, _ = term => {} }
 }
 
-/// Public liveness probe (Docker HEALTHCHECK, uptime checks). Per-source
-/// details follow in M2 behind the login.
-async fn health() -> Json<Value> {
-    Json(json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}))
+/// Public health: liveness plus per-source state (no place data). `status`
+/// is `degraded` when a configured source delivered nothing for 3 h.
+async fn health(State(app): State<App>) -> AppResult<Json<Value>> {
+    let config = app.config().clone();
+    let now = app::now_ms();
+    let sources = app
+        .blocking(move |c| {
+            let places = db::list_places(c)?;
+            let mut out = Vec::new();
+            for p in poller::Provider::ALL {
+                let states: Vec<db::FetchState> = places
+                    .iter()
+                    .filter(|pl| p.applies_to(pl))
+                    .map(|pl| db::fetch_state(c, pl.id, p.name()))
+                    .collect::<anyhow::Result<_>>()?;
+                let last = states.iter().filter_map(|s| s.last_success_at).max();
+                let configured = p.configured(&config);
+                let fresh = last.is_some_and(|t| now - t < 3 * 3_600_000);
+                out.push(json!({
+                    "provider": p,
+                    "configured": configured,
+                    "ok": !configured || states.is_empty() || fresh,
+                    "last_success_at": last,
+                    "error": states.iter().find_map(|s| s.error.clone()),
+                }));
+            }
+            Ok(out)
+        })
+        .await?;
+    let degraded = sources.iter().any(|s| s["ok"] == false);
+    Ok(Json(json!({
+        "status": if degraded { "degraded" } else { "ok" },
+        "version": env!("CARGO_PKG_VERSION"),
+        "sources": sources,
+    })))
 }
 
 async fn me(principal: Principal) -> Json<Value> {
@@ -93,6 +149,7 @@ async fn me(principal: Principal) -> Json<Value> {
             "email": owner.email,
         }),
         Principal::DevAuto => json!({"kind": "dev"}),
+        Principal::Device(d) => json!({"kind": "device", "name": d.name, "device_id": d.id}),
     })
 }
 
@@ -108,6 +165,7 @@ async fn index(State(app): State<App>, headers: HeaderMap) -> AppResult<Response
             .or_else(|| owner.email.clone())
             .unwrap_or_else(|| "angemeldet".into()),
         Principal::DevAuto => "Entwicklungsmodus".into(),
+        Principal::Device(d) => d.name.clone(),
     };
     let who = who
         .replace('&', "&amp;")

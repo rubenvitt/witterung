@@ -102,10 +102,19 @@ async fn authenticate(
     headers: &HeaderMap,
     renewed: &mut Option<HeaderValue>,
 ) -> Result<Principal, AppError> {
-    // No bearer tokens exist yet (device tokens follow in M3). A request that
-    // sends one is refused instead of falling back to the cookie.
-    if headers.contains_key(AUTHORIZATION) {
-        return Err(AppError::Unauthorized);
+    // A request with credentials in the header never falls back to the cookie.
+    if let Some(value) = headers.get(AUTHORIZATION) {
+        let token = value
+            .to_str()
+            .ok()
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .filter(|t| t.starts_with(super::device::TOKEN_PREFIX))
+            .ok_or(AppError::Unauthorized)?;
+        return app
+            .authenticate_device(token.trim())
+            .await?
+            .map(Principal::Device)
+            .ok_or(AppError::Unauthorized);
     }
     if let Some(principal) = browser_principal(app, headers, Some(renewed)).await? {
         return Ok(principal);

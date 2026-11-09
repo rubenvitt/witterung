@@ -1,0 +1,37 @@
+{
+  "alerts": [
+    {
+      "id": 3051010,
+      "alert_id": 3051010,
+      "effective": "2026-11-09T06:34:00+00:00",
+      "onset": "2026-11-09T10:00:00+00:00",
+      "expires": "2026-11-10T19:00:00+00:00",
+      "category": "met",
+      "response_type": "prepare",
+      "urgency": "immediate",
+      "severity": "moderate",
+      "certainty": "likely",
+      "event_code": 63,
+      "event_en": "persistent rain",
+      "event_de": "DAUERREGEN",
+      "headline_en": "Official WARNING of PERSISTANT RAIN",
+      "headline_de": "Amtliche WARNUNG vor DAUERREGEN",
+      "description_en": "There is a risk of persistent rain (level 2 of 4).\nPrecipitation amounts: ~ 40 l/m²; in windward areas: ~ 50 l/m²",
+      "description_de": "Es tritt Dauerregen auf. Dabei werden Niederschlagsmengen um 40 l/m² erwartet. In Staulagen werden Mengen um 50 l/m² erreicht.",
+      "instruction_en": "Hazard(s) caused by: isolated flooding of roads and subways. \nRecommendations for what to do: \nAdapt your behaviour in road traffic. Avoid flooded areas.",
+      "instruction_de": "Gefahr durch: vereinzelte Überflutungen von Straßen/Unterführungen. \nHandlungsempfehlungen: \nVerhalten im Straßenverkehr anpassen; überflutete Abschnitte meiden",
+      "status": "actual",
+      "warn_cell_ids": [
+        803360025
+      ]
+    }
+  ],
+  "location": {
+    "warn_cell_id": 803360025,
+    "name": "Stadt Uelzen",
+    "name_short": "Uelzen",
+    "district": "Uelzen",
+    "state": "Niedersachsen",
+    "state_short": "NI"
+  }
+}

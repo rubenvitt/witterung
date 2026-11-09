@@ -7,9 +7,10 @@
 //! - **CSRF**: cookie-authenticated requests that change state must carry the
 //!   header [`CLIENT_HEADER`] (`X-Witterung-Client: web`). Browsers cannot add
 //!   custom headers cross-site without a CORS preflight, which is never granted.
-//! - **Bearer tokens** (device tokens of the iOS app) follow in M3; until then
-//!   every `Authorization` header is rejected.
+//! - **Bearer tokens**: device tokens of the iOS app (`device.rs`); not
+//!   subject to the CSRF rule.
 
+pub mod device;
 pub mod middleware;
 pub mod oidc;
 pub mod routes;
@@ -37,6 +38,8 @@ pub enum Principal {
     Session(SessionOwner),
     /// `WITTERUNG_DEV_AUTH=true` on a loopback host, without credentials.
     DevAuto,
+    /// iOS app with a device token.
+    Device(crate::db::Device),
 }
 
 impl Principal {

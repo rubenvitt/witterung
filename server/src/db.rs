@@ -9,6 +9,7 @@ use serde::Serialize;
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
     include_str!("../migrations/0002_sources.sql"),
+    include_str!("../migrations/0003_m2.sql"),
 ];
 
 /// Opens (and creates) the database and applies pending migrations.
@@ -132,6 +133,25 @@ pub struct Place {
     pub name: String,
     pub lat: f64,
     pub lon: f64,
+    /// `saved` or `current` (the device location, snapped to a grid).
+    pub kind: String,
+    pub notify: bool,
+    #[serde(skip)]
+    pub last_requested_at: Option<i64>,
+}
+
+const PLACE_COLUMNS: &str = "id, name, lat, lon, kind, notify, last_requested_at";
+
+fn place_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Place> {
+    Ok(Place {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        lat: r.get(2)?,
+        lon: r.get(3)?,
+        kind: r.get(4)?,
+        notify: r.get(5)?,
+        last_requested_at: r.get(6)?,
+    })
 }
 
 pub fn insert_place(
@@ -142,32 +162,255 @@ pub fn insert_place(
     now: i64,
 ) -> anyhow::Result<Place> {
     conn.execute(
-        "INSERT INTO places (name, lat, lon, created_at) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO places (name, lat, lon, created_at, kind, position)
+         VALUES (?1, ?2, ?3, ?4, 'saved', (SELECT COALESCE(MAX(position), 0) + 1 FROM places))",
         params![name, lat, lon, now],
     )?;
-    Ok(Place {
-        id: conn.last_insert_rowid(),
-        name: name.to_owned(),
-        lat,
-        lon,
-    })
+    Ok(find_place(conn, conn.last_insert_rowid())?.expect("just inserted"))
 }
 
+/// All places: saved ones in their order, then current-location ones.
 pub fn list_places(conn: &Connection) -> anyhow::Result<Vec<Place>> {
-    let mut stmt = conn.prepare("SELECT id, name, lat, lon FROM places ORDER BY id")?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {PLACE_COLUMNS} FROM places ORDER BY kind = 'current', position, id"
+    ))?;
+    let rows = stmt.query_map([], place_row)?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn find_place(conn: &Connection, id: i64) -> anyhow::Result<Option<Place>> {
+    Ok(conn
+        .query_row(
+            &format!("SELECT {PLACE_COLUMNS} FROM places WHERE id = ?1"),
+            [id],
+            place_row,
+        )
+        .optional()?)
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct PlaceUpdate {
+    pub name: Option<String>,
+    pub notify: Option<bool>,
+    /// New index among the saved places (0 = first).
+    pub position: Option<usize>,
+}
+
+pub fn update_place(conn: &Connection, id: i64, update: &PlaceUpdate) -> anyhow::Result<bool> {
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute(
+        "UPDATE places SET name = COALESCE(?2, name), notify = COALESCE(?3, notify)
+         WHERE id = ?1 AND kind = 'saved'",
+        params![id, update.name, update.notify],
+    )?;
+    if changed == 0 {
+        return Ok(false);
+    }
+    if let Some(pos) = update.position {
+        let mut ids: Vec<i64> = list_places(&tx)?
+            .into_iter()
+            .filter(|p| p.kind == "saved" && p.id != id)
+            .map(|p| p.id)
+            .collect();
+        ids.insert(pos.min(ids.len()), id);
+        for (i, pid) in ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE places SET position = ?2 WHERE id = ?1",
+                params![pid, i as i64 + 1],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(true)
+}
+
+pub fn delete_place(conn: &Connection, id: i64) -> anyhow::Result<bool> {
+    Ok(conn.execute("DELETE FROM places WHERE id = ?1 AND kind = 'saved'", [id])? > 0)
+}
+
+/// The current-location place at the snapped coordinates (created on first
+/// use); marks it as requested now.
+pub fn current_place(conn: &Connection, lat: f64, lon: f64, now: i64) -> anyhow::Result<Place> {
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM places WHERE kind = 'current' AND abs(lat - ?1) < 1e-6 AND abs(lon - ?2) < 1e-6",
+            params![lat, lon],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let id = match existing {
+        Some(id) => id,
+        None => {
+            conn.execute(
+                "INSERT INTO places (name, lat, lon, created_at, kind) VALUES ('Mein Standort', ?1, ?2, ?3, 'current')",
+                params![lat, lon, now],
+            )?;
+            conn.last_insert_rowid()
+        }
+    };
+    conn.execute(
+        "UPDATE places SET last_requested_at = ?2 WHERE id = ?1",
+        params![id, now],
+    )?;
+    Ok(find_place(conn, id)?.expect("exists"))
+}
+
+/// Forgets current-location places not requested since `before`.
+pub fn purge_current_places(conn: &Connection, before: i64) -> anyhow::Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM places WHERE kind = 'current' AND COALESCE(last_requested_at, 0) < ?1",
+        [before],
+    )?)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Device {
+    pub id: i64,
+    pub name: String,
+    pub created_at: i64,
+    pub last_used_at: Option<i64>,
+}
+
+pub fn insert_device_code(
+    conn: &Connection,
+    code_hash: &str,
+    challenge: &str,
+    name: &str,
+    subject: Option<&str>,
+    expires_at: i64,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "DELETE FROM device_codes WHERE expires_at <= ?1",
+        [expires_at - 5 * 60_000],
+    )?;
+    conn.execute(
+        "INSERT INTO device_codes (code_hash, challenge, name, subject, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![code_hash, challenge, name, subject, expires_at],
+    )?;
+    Ok(())
+}
+
+/// Takes a code (single use): `(challenge, name, subject)` if valid at `now`.
+pub fn take_device_code(
+    conn: &Connection,
+    code_hash: &str,
+    now: i64,
+) -> anyhow::Result<Option<(String, String, Option<String>)>> {
+    let row = conn
+        .query_row(
+            "SELECT challenge, name, subject, expires_at FROM device_codes WHERE code_hash = ?1",
+            [code_hash],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)?)),
+        )
+        .optional()?;
+    conn.execute("DELETE FROM device_codes WHERE code_hash = ?1", [code_hash])?;
+    Ok(row.filter(|r| r.3 > now).map(|(c, n, s, _)| (c, n, s)))
+}
+
+pub fn insert_device(
+    conn: &Connection,
+    name: &str,
+    token_hash: &str,
+    subject: Option<&str>,
+    now: i64,
+) -> anyhow::Result<i64> {
+    conn.execute(
+        "INSERT INTO devices (name, token_hash, subject, created_at) VALUES (?1, ?2, ?3, ?4)",
+        params![name, token_hash, subject, now],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// The device a token hash belongs to; refreshes `last_used_at` at most hourly.
+pub fn device_by_token(
+    conn: &Connection,
+    token_hash: &str,
+    now: i64,
+) -> anyhow::Result<Option<Device>> {
+    let device = conn
+        .query_row(
+            "SELECT id, name, created_at, last_used_at FROM devices WHERE token_hash = ?1",
+            [token_hash],
+            |r| {
+                Ok(Device {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    created_at: r.get(2)?,
+                    last_used_at: r.get(3)?,
+                })
+            },
+        )
+        .optional()?;
+    if let Some(d) = &device {
+        if d.last_used_at.is_none_or(|t| now - t > 3_600_000) {
+            conn.execute(
+                "UPDATE devices SET last_used_at = ?2 WHERE id = ?1",
+                params![d.id, now],
+            )?;
+        }
+    }
+    Ok(device)
+}
+
+pub fn list_devices(conn: &Connection) -> anyhow::Result<Vec<Device>> {
+    let mut stmt =
+        conn.prepare("SELECT id, name, created_at, last_used_at FROM devices ORDER BY id")?;
     let rows = stmt.query_map([], |r| {
-        Ok(Place {
+        Ok(Device {
             id: r.get(0)?,
             name: r.get(1)?,
-            lat: r.get(2)?,
-            lon: r.get(3)?,
+            created_at: r.get(2)?,
+            last_used_at: r.get(3)?,
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-pub fn find_place(conn: &Connection, id: i64) -> anyhow::Result<Option<Place>> {
-    Ok(list_places(conn)?.into_iter().find(|p| p.id == id))
+pub fn delete_device(conn: &Connection, id: i64) -> anyhow::Result<bool> {
+    Ok(conn.execute("DELETE FROM devices WHERE id = ?1", [id])? > 0)
+}
+
+pub fn get_setting(conn: &Connection, key: &str) -> anyhow::Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+            r.get(0)
+        })
+        .optional()?)
+}
+
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    )?;
+    Ok(())
+}
+
+/// Records a push key for a place; `false` if it was already sent.
+pub fn mark_push_sent(
+    conn: &Connection,
+    place_id: i64,
+    key: &str,
+    now: i64,
+) -> anyhow::Result<bool> {
+    Ok(conn.execute(
+        "INSERT OR IGNORE INTO push_sent (place_id, key, sent_at) VALUES (?1, ?2, ?3)",
+        params![place_id, key, now],
+    )? > 0)
+}
+
+pub fn unmark_push_sent(conn: &Connection, place_id: i64, key: &str) -> anyhow::Result<()> {
+    conn.execute(
+        "DELETE FROM push_sent WHERE place_id = ?1 AND key = ?2",
+        params![place_id, key],
+    )?;
+    Ok(())
+}
+
+pub fn purge_push_sent(conn: &Connection, before: i64) -> anyhow::Result<()> {
+    conn.execute("DELETE FROM push_sent WHERE sent_at < ?1", [before])?;
+    Ok(())
 }
 
 /// Poll bookkeeping of one provider for one place (times in ms).

@@ -128,6 +128,18 @@ impl App {
         .await
     }
 
+    /// Keyed hash for stored secrets (sessions, device tokens, codes).
+    pub fn secret_hash(&self, secret: &str) -> String {
+        auth::session_hash(self.session_key(), secret)
+    }
+
+    pub async fn authenticate_device(&self, token: &str) -> AppResult<Option<db::Device>> {
+        let hash = self.secret_hash(token);
+        let now = now_ms();
+        self.blocking(move |conn| db::device_by_token(conn, &hash, now))
+            .await
+    }
+
     pub async fn end_session(&self, raw: &str) -> AppResult<()> {
         let hash = auth::session_hash(self.session_key(), raw);
         self.blocking(move |conn| db::delete_session(conn, &hash))

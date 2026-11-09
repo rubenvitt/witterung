@@ -8,6 +8,7 @@
 //! sums with the end of the hour are shifted by their adapter.
 
 pub mod bright_sky;
+pub mod dwd;
 pub mod open_meteo;
 pub mod pirate_weather;
 pub mod weatherkit;
@@ -157,6 +158,11 @@ impl Default for Endpoints {
             pirate_weather: url("https://api.pirateweather.net/"),
         }
     }
+}
+
+/// `HH:MM` in Europe/Berlin.
+pub fn berlin_time(t: Timestamp) -> String {
+    t.to_zoned(berlin()).strftime("%H:%M").to_string()
 }
 
 /// The local time zone for day boundaries (bundled tzdb, no system files needed).

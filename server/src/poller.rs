@@ -14,12 +14,15 @@ use serde::Serialize;
 use crate::app::App;
 use crate::db::{self, FetchState, Place};
 use crate::quota::{self, Budget, Period};
-use crate::sources::{bright_sky, open_meteo, pirate_weather, weatherkit, SourceData, SourceError};
+use crate::sources::{
+    bright_sky, dwd, open_meteo, pirate_weather, weatherkit, SourceData, SourceError,
+};
 
 const TICK: Duration = Duration::from_secs(60);
 const BACKOFF_BASE: SignedDuration = SignedDuration::from_secs(60);
 
-/// One upstream request type; quota is booked per provider.
+/// One upstream request type; state per (place, provider), quota per
+/// [`Provider::quota_key`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
@@ -28,30 +31,51 @@ pub enum Provider {
     #[serde(rename = "weatherkit")]
     WeatherKit,
     PirateWeather,
+    /// Bright Sky `/current_weather` (DWD station observation).
+    DwdObservation,
+    /// Bright Sky `/alerts`.
+    DwdAlerts,
+    /// Bright Sky `/radar` (nowcast).
+    DwdRadar,
 }
 
 /// Attribution the licenses require, shown wherever the data is.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct Attribution {
+    pub source: &'static str,
     pub text: &'static str,
     pub url: &'static str,
 }
 
+/// Snapshot keys of the non-forecast feeds.
+pub const OBSERVATION_KEY: &str = "dwd:observation";
+pub const ALERTS_KEY: &str = "dwd:alerts";
+pub const NOWCAST_KEY: &str = "dwd:nowcast";
+
 impl Provider {
-    pub const ALL: [Provider; 4] = [
+    pub const ALL: [Provider; 7] = [
         Provider::OpenMeteo,
         Provider::BrightSky,
         Provider::WeatherKit,
         Provider::PirateWeather,
+        Provider::DwdObservation,
+        Provider::DwdAlerts,
+        Provider::DwdRadar,
     ];
 
     /// Sources with credentials are off until the credentials are set.
     pub fn configured(self, config: &crate::Config) -> bool {
         match self {
-            Provider::OpenMeteo | Provider::BrightSky => true,
             Provider::WeatherKit => config.weatherkit.is_some(),
             Provider::PirateWeather => config.pirate_weather_key.is_some(),
+            _ => true,
         }
+    }
+
+    /// Whether this provider is polled for a place. Pirate Weather (tight
+    /// monthly quota) only for saved places.
+    pub fn applies_to(self, place: &Place) -> bool {
+        !(self == Provider::PirateWeather && place.kind != "saved")
     }
 
     pub fn name(self) -> &'static str {
@@ -60,37 +84,57 @@ impl Provider {
             Provider::BrightSky => "bright_sky",
             Provider::WeatherKit => "weatherkit",
             Provider::PirateWeather => "pirate_weather",
+            Provider::DwdObservation => "dwd_observation",
+            Provider::DwdAlerts => "dwd_alerts",
+            Provider::DwdRadar => "dwd_radar",
+        }
+    }
+
+    /// The account whose quota a call uses.
+    pub fn quota_key(self) -> &'static str {
+        match self {
+            Provider::BrightSky
+            | Provider::DwdObservation
+            | Provider::DwdAlerts
+            | Provider::DwdRadar => "bright_sky",
+            p => p.name(),
         }
     }
 
     pub fn interval(self) -> SignedDuration {
         match self {
-            Provider::WeatherKit => SignedDuration::from_mins(15),
+            Provider::WeatherKit | Provider::DwdObservation => SignedDuration::from_mins(15),
+            Provider::DwdAlerts | Provider::DwdRadar => SignedDuration::from_mins(10),
             Provider::OpenMeteo | Provider::BrightSky | Provider::PirateWeather => {
                 SignedDuration::from_hours(1)
             }
         }
     }
 
-    /// See docs/plan.md §4 for the numbers.
+    /// Older data is flagged `stale` (3 × the interval).
+    pub fn stale_after(self) -> SignedDuration {
+        self.interval() * 3
+    }
+
+    /// See docs/schema.md for the numbers.
     pub fn budget(self) -> Budget {
-        match self {
-            Provider::OpenMeteo => Budget {
+        match self.quota_key() {
+            "open_meteo" => Budget {
                 quota: 10_000.0,
                 period: Period::Day,
             },
-            // No official quota (fair use): our own cap.
-            Provider::BrightSky => Budget {
-                quota: 6_000.0,
-                period: Period::Day,
-            },
-            Provider::WeatherKit => Budget {
+            "weatherkit" => Budget {
                 quota: 500_000.0,
                 period: Period::Month,
             },
-            Provider::PirateWeather => Budget {
+            "pirate_weather" => Budget {
                 quota: 10_000.0,
                 period: Period::Month,
+            },
+            // Bright Sky has no official quota (fair use): our own cap.
+            _ => Budget {
+                quota: 6_000.0,
+                period: Period::Day,
             },
         }
     }
@@ -99,74 +143,88 @@ impl Provider {
     pub fn weight(self) -> f64 {
         match self {
             Provider::OpenMeteo => open_meteo::request_weight(),
-            Provider::BrightSky | Provider::WeatherKit | Provider::PirateWeather => 1.0,
+            _ => 1.0,
         }
     }
 
     pub fn attribution(self) -> Attribution {
         match self {
             Provider::OpenMeteo => Attribution {
+                source: "open_meteo",
                 text: "Wetterdaten von Open-Meteo.com (CC BY 4.0)",
                 url: "https://open-meteo.com/",
             },
-            Provider::BrightSky => Attribution {
-                text: "Quelle: Deutscher Wetterdienst (DWD), abgerufen über Bright Sky",
-                url: "https://www.dwd.de/",
-            },
-            // The app shows the Apple Weather mark; the link is mandatory.
             Provider::WeatherKit => Attribution {
+                source: "weatherkit",
                 text: "Apple Weather",
                 url: "https://developer.apple.com/weatherkit/data-source-attribution/",
             },
             Provider::PirateWeather => Attribution {
+                source: "pirate_weather",
                 text: "Pirate Weather",
                 url: "https://pirateweather.net/",
+            },
+            _ => Attribution {
+                source: "dwd",
+                text: "Quelle: Deutscher Wetterdienst (DWD), abgerufen über Bright Sky",
+                url: "https://www.dwd.de/",
             },
         }
     }
 
+    /// `(snapshot key, JSON)` pairs.
     async fn fetch(
         self,
         app: &App,
         place: &Place,
         now: Timestamp,
-    ) -> Result<Vec<SourceData>, SourceError> {
+    ) -> Result<Vec<(String, String)>, SourceError> {
         let config = app.config();
-        let endpoints = &config.endpoints;
+        let e = &config.endpoints;
+        let (http, lat, lon) = (app.http(), place.lat, place.lon);
+        let forecast = |data: Vec<SourceData>| -> Result<Vec<(String, String)>, SourceError> {
+            data.iter()
+                .map(|d| {
+                    serde_json::to_string(d)
+                        .map(|j| (d.source.as_str().to_owned(), j))
+                        .map_err(|e| SourceError::Parse(e.to_string()))
+                })
+                .collect()
+        };
+        let one = |key: &str, v: Result<String, serde_json::Error>| {
+            v.map(|j| vec![(key.to_owned(), j)])
+                .map_err(|e| SourceError::Parse(e.to_string()))
+        };
         match self {
             Provider::OpenMeteo => {
-                open_meteo::fetch(app.http(), &endpoints.open_meteo, place.lat, place.lon).await
+                forecast(open_meteo::fetch(http, &e.open_meteo, lat, lon).await?)
             }
             Provider::BrightSky => {
-                bright_sky::fetch(app.http(), &endpoints.bright_sky, place.lat, place.lon, now)
-                    .await
+                forecast(bright_sky::fetch(http, &e.bright_sky, lat, lon, now).await?)
             }
             Provider::WeatherKit => {
                 let Some(wk) = &config.weatherkit else {
                     return Err(SourceError::Http("nicht konfiguriert".into()));
                 };
-                weatherkit::fetch(
-                    app.http(),
-                    &endpoints.weatherkit,
-                    wk,
-                    place.lat,
-                    place.lon,
-                    now,
-                )
-                .await
+                forecast(weatherkit::fetch(http, &e.weatherkit, wk, lat, lon, now).await?)
             }
             Provider::PirateWeather => {
                 let Some(key) = &config.pirate_weather_key else {
                     return Err(SourceError::Http("nicht konfiguriert".into()));
                 };
-                pirate_weather::fetch(
-                    app.http(),
-                    &endpoints.pirate_weather,
-                    &key.0,
-                    place.lat,
-                    place.lon,
-                )
-                .await
+                forecast(pirate_weather::fetch(http, &e.pirate_weather, &key.0, lat, lon).await?)
+            }
+            Provider::DwdObservation => {
+                let o = dwd::fetch_observation(http, &e.bright_sky, lat, lon).await?;
+                one(OBSERVATION_KEY, serde_json::to_string(&o))
+            }
+            Provider::DwdAlerts => {
+                let a = dwd::fetch_alerts(http, &e.bright_sky, lat, lon).await?;
+                one(ALERTS_KEY, serde_json::to_string(&a))
+            }
+            Provider::DwdRadar => {
+                let n = dwd::fetch_nowcast(http, &e.bright_sky, lat, lon).await?;
+                one(NOWCAST_KEY, serde_json::to_string(&n))
             }
         }
     }
@@ -200,8 +258,12 @@ pub fn spawn(app: App) {
     });
 }
 
+/// Current-location places are polled while requested within this window.
+pub const CURRENT_ACTIVE: SignedDuration = SignedDuration::from_hours(24);
+
 /// One round over all places and providers (sequential: a hanging
-/// upstream delays the others by at most the HTTP timeout).
+/// upstream delays the others by at most the HTTP timeout), then push
+/// checks and housekeeping.
 pub async fn poll_once(app: &App, now: Timestamp) {
     let places = match app.blocking(db::list_places).await {
         Ok(p) => p,
@@ -210,16 +272,41 @@ pub async fn poll_once(app: &App, now: Timestamp) {
             return;
         }
     };
-    for place in &places {
-        for provider in Provider::ALL
-            .into_iter()
-            .filter(|p| p.configured(app.config()))
-        {
-            if let Err(e) = poll(app, place, provider, now).await {
-                tracing::error!(error = %e, place = place.id, provider = provider.name(), "poller: bookkeeping failed");
-            }
+    let active_since = (now - CURRENT_ACTIVE).as_millisecond();
+    for place in places
+        .iter()
+        .filter(|p| p.kind == "saved" || p.last_requested_at.unwrap_or(0) >= active_since)
+    {
+        poll_place(app, place, &Provider::ALL, now).await;
+    }
+    if let Err(e) = crate::push::evaluate(app, now).await {
+        tracing::error!(error = %e, "push check failed");
+    }
+    if let Err(e) = housekeeping(app, now).await {
+        tracing::error!(error = %e, "housekeeping failed");
+    }
+}
+
+/// Polls the given providers for one place where due and configured.
+pub async fn poll_place(app: &App, place: &Place, providers: &[Provider], now: Timestamp) {
+    for &provider in providers {
+        if !provider.configured(app.config()) || !provider.applies_to(place) {
+            continue;
+        }
+        if let Err(e) = poll(app, place, provider, now).await {
+            tracing::error!(error = %e, place = place.id, provider = provider.name(), "poller: bookkeeping failed");
         }
     }
+}
+
+async fn housekeeping(app: &App, now: Timestamp) -> crate::error::AppResult<()> {
+    let week_ago = (now - SignedDuration::from_hours(24 * 7)).as_millisecond();
+    app.blocking(move |c| {
+        db::purge_current_places(c, week_ago)?;
+        db::purge_push_sent(c, week_ago)
+    })
+    .await?;
+    crate::backup::maybe_run(app, now).await
 }
 
 async fn poll(
@@ -233,9 +320,9 @@ async fn poll(
     if !is_due(&state, provider.interval(), now) {
         return Ok(());
     }
-    let (budget, weight) = (provider.budget(), provider.weight());
+    let (budget, weight, account) = (provider.budget(), provider.weight(), provider.quota_key());
     let booked = app
-        .blocking(move |c| quota::try_spend(c, name, budget, weight, now))
+        .blocking(move |c| quota::try_spend(c, account, budget, weight, now))
         .await?;
     if !booked {
         // No attempt is recorded: it stays due and is retried next tick
@@ -263,9 +350,7 @@ async fn poll(
             state.last_success_at = Some(at);
             state.failures = 0;
             state.error = None;
-            data.iter()
-                .map(|d| Ok((d.source.as_str(), serde_json::to_string(d)?)))
-                .collect::<anyhow::Result<Vec<_>>>()?
+            data
         }
         Err(e) => {
             tracing::warn!(provider = name, place = id, error = %e, "fetch failed");
@@ -287,9 +372,6 @@ async fn poll(
 }
 
 pub const QUOTA_ERROR: &str = "quota";
-
-/// Data older than this is flagged `stale` (3 × the poll interval).
-pub const STALE_AFTER: SignedDuration = SignedDuration::from_hours(3);
 
 #[cfg(test)]
 mod tests {
