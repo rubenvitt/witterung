@@ -303,13 +303,17 @@ private struct DayRowView: View {
     let low: Double
     let high: Double
     let current: Double?
+    @ScaledMetric(relativeTo: .body) private var dayWidth = 52
+    @ScaledMetric(relativeTo: .caption) private var mmWidth = 52
 
     var body: some View {
         let c = day.consensus
         HStack(spacing: 10) {
             Text(Fmt.weekday(day.date))
                 .font(.body.weight(.medium))
-                .frame(width: 52, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(width: dayWidth, alignment: .leading)
             VStack(spacing: 0) {
                 Image(systemName: c.condition.symbol())
                     .symbolRenderingMode(.multicolor)
@@ -331,7 +335,8 @@ private struct DayRowView: View {
             Text(c.precipMm >= 0.1 ? Fmt.mm(c.precipMm) : "")
                 .font(.caption)
                 .foregroundStyle(.cyan)
-                .frame(width: 52, alignment: .trailing)
+                .lineLimit(1)
+                .frame(width: mmWidth, alignment: .trailing)
         }
         .padding(.vertical, 9)
         .contentShape(Rectangle())

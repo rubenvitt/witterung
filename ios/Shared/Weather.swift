@@ -155,10 +155,13 @@ extension Forecast {
     func rainHint(at date: Date) -> String {
         var from = date
         switch NowcastSummary(nowcast, now: date) {
-        case .startsIn(let minutes, _):
-            return "Regen ab \(Fmt.time(date.addingTimeInterval(Double(minutes) * 60)))"
-        case .rainingEndsIn(let minutes, _):
-            return "Regen bis \(Fmt.time(date.addingTimeInterval(Double(minutes) * 60)))"
+        case .startsIn:
+            // Uhrzeit des Radarschritts (5-min-Raster), nicht jetzt + gerundete Minuten.
+            let start = nowcast?.points.first { $0.at > date && $0.precipMmH >= NowcastSummary.threshold }
+            return "Regen ab \(Fmt.time(start?.at ?? date))"
+        case .rainingEndsIn:
+            let end = nowcast?.points.first { $0.at > date && $0.precipMmH < NowcastSummary.threshold }
+            return "Regen bis \(Fmt.time(end?.at ?? date))"
         case .rainingContinues:
             return "Regen hält an"
         case .dry:

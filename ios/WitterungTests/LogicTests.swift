@@ -58,6 +58,8 @@ struct NowcastTests {
     @Test func widgetRainHint() throws {
         let forecast = try JSONDecoder.api.decode(Forecast.self, from: DecodingTests.fixture())
         #expect(forecast.rainHint(at: Self.start) == "Regen ab 13:25")
+        // 3 min später: weiter die Uhrzeit des Radarschritts, nicht 13:28
+        #expect(forecast.rainHint(at: Self.start.addingTimeInterval(180)) == "Regen ab 13:25")
         // Nach dem Radar-Horizont: Stundenwerte (Fixture: trocken ab 16 Uhr UTC bis zum nächsten Mittag).
         #expect(forecast.rainHint(at: Self.start.addingTimeInterval(5 * 3600)) == "Kein Regen in Sicht")
         #expect(forecast.rainHint(at: Self.start.addingTimeInterval(20 * 3600)) == "Regen ab 15 Uhr")

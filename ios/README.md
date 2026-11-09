@@ -175,7 +175,9 @@ Eine Ausnahme für Widgets nennt die Seite nicht. Daraus folgt für Witterung:
 `docs/screenshots/`, iPhone 17 Pro Simulator, 09.11.2026. Quelle steht im Dateinamen:
 **echt** = lokaler Dev-Server (Hauptcheckout, Stand M2) mit Live-Daten von Open-Meteo und
 Bright Sky, ohne WeatherKit und Pirate Weather; **mock** = `scripts/mock-server.py` mit der
-Fixture, weil es am Aufnahmetag in Uelzen weder Warnungen noch Regen gab. Die Widget-Bilder
+Fixture, weil es am Aufnahmetag in Uelzen weder Warnungen noch Regen gab und der Dev-Server
+ohne WeatherKit läuft (15 zeigt die Marke „Weather · Daten verändert“ im mittleren und großen
+Widget, 14 die Schriftgröße XXL). Die Widget-Bilder
 sind die Widget-Ansichten in Originalgröße in der Debug-Galerie, nicht der echte
 Home-Bildschirm (Widgets lassen sich per simctl nicht ablegen); die Sperrbildschirm-Darstellung
 (vibrant, getönt) zeigen sie nicht.
