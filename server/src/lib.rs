@@ -1,11 +1,15 @@
 //! Witterung server: login, health, and (from M1) the weather API.
 
+pub mod api;
 pub mod app;
 pub mod auth;
 pub mod config;
 pub mod db;
 pub mod error;
 pub mod healthcheck;
+pub mod poller;
+pub mod quota;
+pub mod sources;
 
 use axum::extract::State;
 use axum::http::HeaderMap;
@@ -27,6 +31,11 @@ pub fn build(config: Config, http: reqwest::Client) -> anyhow::Result<(App, Rout
     let app = App::open(config, http)?;
     let api = Router::new()
         .route("/api/v1/me", get(me))
+        .route(
+            "/api/v1/places",
+            get(api::list_places).post(api::create_place),
+        )
+        .route("/api/v1/places/{id}/raw", get(api::raw))
         .route_layer(middleware::from_fn_with_state(app.clone(), require_auth));
     let router = Router::new()
         .route("/", get(index))
@@ -44,7 +53,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .timeout(std::time::Duration::from_secs(20))
         .user_agent(concat!("witterung/", env!("CARGO_PKG_VERSION")))
         .build()?;
-    let (_app, router) = build(config, http)?;
+    let (app, router) = build(config, http)?;
+    poller::spawn(app);
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(%bind, "listening");
     axum::serve(listener, router)

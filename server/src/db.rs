@@ -1,11 +1,15 @@
-//! SQLite: opening, migrations, sessions.
+//! SQLite: opening, migrations, sessions, places and poll results.
 
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
 
 /// Migrations in order; `PRAGMA user_version` counts the applied ones.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_init.sql"),
+    include_str!("../migrations/0002_sources.sql"),
+];
 
 /// Opens (and creates) the database and applies pending migrations.
 pub fn open(path: &Path) -> anyhow::Result<Connection> {
@@ -120,6 +124,127 @@ pub fn delete_session(conn: &Connection, id_hash: &str) -> anyhow::Result<()> {
 /// Removes expired sessions; returns how many.
 pub fn purge_expired_sessions(conn: &Connection, now: i64) -> anyhow::Result<usize> {
     Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= ?1", [now])?)
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Place {
+    pub id: i64,
+    pub name: String,
+    pub lat: f64,
+    pub lon: f64,
+}
+
+pub fn insert_place(
+    conn: &Connection,
+    name: &str,
+    lat: f64,
+    lon: f64,
+    now: i64,
+) -> anyhow::Result<Place> {
+    conn.execute(
+        "INSERT INTO places (name, lat, lon, created_at) VALUES (?1, ?2, ?3, ?4)",
+        params![name, lat, lon, now],
+    )?;
+    Ok(Place {
+        id: conn.last_insert_rowid(),
+        name: name.to_owned(),
+        lat,
+        lon,
+    })
+}
+
+pub fn list_places(conn: &Connection) -> anyhow::Result<Vec<Place>> {
+    let mut stmt = conn.prepare("SELECT id, name, lat, lon FROM places ORDER BY id")?;
+    let rows = stmt.query_map([], |r| {
+        Ok(Place {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            lat: r.get(2)?,
+            lon: r.get(3)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn find_place(conn: &Connection, id: i64) -> anyhow::Result<Option<Place>> {
+    Ok(list_places(conn)?.into_iter().find(|p| p.id == id))
+}
+
+/// Poll bookkeeping of one provider for one place (times in ms).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct FetchState {
+    pub last_attempt_at: Option<i64>,
+    pub last_success_at: Option<i64>,
+    pub failures: u32,
+    pub error: Option<String>,
+}
+
+pub fn fetch_state(conn: &Connection, place_id: i64, provider: &str) -> anyhow::Result<FetchState> {
+    Ok(conn
+        .query_row(
+            "SELECT last_attempt_at, last_success_at, failures, error FROM fetch_state
+             WHERE place_id = ?1 AND provider = ?2",
+            params![place_id, provider],
+            |r| {
+                Ok(FetchState {
+                    last_attempt_at: r.get(0)?,
+                    last_success_at: r.get(1)?,
+                    failures: r.get(2)?,
+                    error: r.get(3)?,
+                })
+            },
+        )
+        .optional()?
+        .unwrap_or_default())
+}
+
+pub fn save_fetch_state(
+    conn: &Connection,
+    place_id: i64,
+    provider: &str,
+    state: &FetchState,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO fetch_state (place_id, provider, last_attempt_at, last_success_at, failures, error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT (place_id, provider) DO UPDATE SET
+           last_attempt_at = excluded.last_attempt_at, last_success_at = excluded.last_success_at,
+           failures = excluded.failures, error = excluded.error",
+        params![
+            place_id,
+            provider,
+            state.last_attempt_at,
+            state.last_success_at,
+            state.failures,
+            state.error
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn save_snapshot(
+    conn: &Connection,
+    place_id: i64,
+    source: &str,
+    fetched_at: i64,
+    data: &str,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO snapshots (place_id, source, fetched_at, data) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (place_id, source) DO UPDATE SET
+           fetched_at = excluded.fetched_at, data = excluded.data",
+        params![place_id, source, fetched_at, data],
+    )?;
+    Ok(())
+}
+
+/// `(source, fetched_at, data JSON)` of all sources of a place.
+pub fn snapshots(conn: &Connection, place_id: i64) -> anyhow::Result<Vec<(String, i64, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT source, fetched_at, data FROM snapshots WHERE place_id = ?1 ORDER BY source",
+    )?;
+    let rows = stmt.query_map([place_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 #[cfg(test)]

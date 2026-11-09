@@ -12,6 +12,10 @@ pub enum AppError {
     Unauthorized,
     #[error("{0}")]
     Forbidden(String),
+    #[error("{0}")]
+    BadRequest(String),
+    #[error("nicht gefunden")]
+    NotFound,
     #[error("interner Fehler")]
     Internal(#[from] anyhow::Error),
 }
@@ -21,6 +25,8 @@ impl AppError {
         match self {
             AppError::Unauthorized => StatusCode::UNAUTHORIZED,
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
+            AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            AppError::NotFound => StatusCode::NOT_FOUND,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -29,6 +35,8 @@ impl AppError {
         match self {
             AppError::Unauthorized => "unauthorized",
             AppError::Forbidden(_) => "forbidden",
+            AppError::BadRequest(_) => "bad_request",
+            AppError::NotFound => "not_found",
             AppError::Internal(_) => "internal",
         }
     }

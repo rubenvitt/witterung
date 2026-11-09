@@ -43,6 +43,8 @@ pub struct Config {
     /// Key for hashing session IDs (HMAC-SHA256).
     pub session_secret: String,
     pub dev_auth: bool,
+    /// Upstream base URLs; fixed in production, overridden by tests.
+    pub endpoints: crate::sources::Endpoints,
 }
 
 impl Config {
@@ -154,6 +156,7 @@ impl Config {
             oidc,
             session_secret,
             dev_auth,
+            endpoints: Default::default(),
         })
     }
 
@@ -166,6 +169,7 @@ impl Config {
             oidc: None,
             session_secret: DEV_SESSION_SECRET.to_owned(),
             dev_auth: false,
+            endpoints: Default::default(),
         }
     }
 

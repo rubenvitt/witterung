@@ -19,6 +19,7 @@ struct Inner {
     config: Config,
     db: Mutex<Connection>,
     oidc: Option<Arc<OidcClient>>,
+    http: reqwest::Client,
 }
 
 /// A freshly created session; `id` goes into the cookie.
@@ -47,7 +48,7 @@ impl App {
                 oidc,
                 config.oidc_redirect_uri(),
                 &config.session_secret,
-                http,
+                http.clone(),
             ))
         });
         Ok(Self {
@@ -55,6 +56,7 @@ impl App {
                 config,
                 db: Mutex::new(conn),
                 oidc,
+                http,
             }),
         })
     }
@@ -67,8 +69,12 @@ impl App {
         self.inner.oidc.as_ref()
     }
 
+    pub fn http(&self) -> &reqwest::Client {
+        &self.inner.http
+    }
+
     /// Runs `f` with the database on the blocking pool.
-    async fn blocking<T: Send + 'static>(
+    pub async fn blocking<T: Send + 'static>(
         &self,
         f: impl FnOnce(&Connection) -> anyhow::Result<T> + Send + 'static,
     ) -> AppResult<T> {
