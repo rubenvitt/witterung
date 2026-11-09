@@ -180,7 +180,7 @@ fn aggregate_days(hourly: &[HourPoint]) -> Result<Vec<DayPoint>, SourceError> {
                 .iter()
                 .filter_map(|p| p.precip_prob_pct)
                 .reduce(f64::max),
-            wind_max_kmh: fold(|p| p.wind_kmh, f64::max),
+            wind_max_kmh: Some(fold(|p| p.wind_kmh, f64::max)),
             gust_max_kmh: hours.iter().filter_map(|p| p.gust_kmh).reduce(f64::max),
             condition: day_condition(&conditions, precip_mm),
             sunrise: None,

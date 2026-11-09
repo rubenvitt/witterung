@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 use url::Url;
 
+use crate::sources::weatherkit::WeatherKitConfig;
+
 /// Minimum length of `WITTERUNG_SESSION_SECRET`.
 pub const MIN_SESSION_SECRET_LEN: usize = 32;
 
@@ -21,6 +23,16 @@ pub struct ConfigError(pub String);
 
 fn err<T>(msg: impl Into<String>) -> Result<T, ConfigError> {
     Err(ConfigError(msg.into()))
+}
+
+/// A credential whose value must not end up in logs.
+#[derive(Clone)]
+pub struct Secret(pub String);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(…)")
+    }
 }
 
 /// OpenID Connect settings (Pocket ID).
@@ -45,6 +57,9 @@ pub struct Config {
     pub dev_auth: bool,
     /// Upstream base URLs; fixed in production, overridden by tests.
     pub endpoints: crate::sources::Endpoints,
+    /// Source credentials (env or Docker secrets); a source without them is off.
+    pub weatherkit: Option<WeatherKitConfig>,
+    pub pirate_weather_key: Option<Secret>,
 }
 
 impl Config {
@@ -149,6 +164,41 @@ impl Config {
             None => DEV_SESSION_SECRET.to_owned(),
         };
 
+        // A secret either inline or, for Docker secrets, from a file.
+        let secret = |key: &str| -> Result<Option<String>, ConfigError> {
+            match get(&format!("{key}_FILE")) {
+                Some(path) => std::fs::read_to_string(&path)
+                    .map(|v| Some(v.trim().to_owned()))
+                    .map_err(|e| ConfigError(format!("{key}_FILE ({path}) nicht lesbar: {e}"))),
+                None => Ok(get(key)),
+            }
+        };
+        let weatherkit = match (
+            secret("WITTERUNG_WEATHERKIT_KEY")?,
+            get("WITTERUNG_WEATHERKIT_KEY_ID"),
+            get("WITTERUNG_WEATHERKIT_TEAM_ID"),
+            get("WITTERUNG_WEATHERKIT_SERVICE_ID"),
+        ) {
+            (None, None, None, None) => None,
+            (Some(key_pem), Some(key_id), Some(team_id), Some(service_id)) => {
+                let wk = WeatherKitConfig {
+                    key_pem,
+                    key_id,
+                    team_id,
+                    service_id,
+                };
+                wk.validate().map_err(ConfigError)?;
+                Some(wk)
+            }
+            _ => {
+                return err(
+                    "WeatherKit braucht WITTERUNG_WEATHERKIT_KEY_FILE (oder _KEY), _KEY_ID, \
+                     _TEAM_ID und _SERVICE_ID zusammen",
+                );
+            }
+        };
+        let pirate_weather_key = secret("WITTERUNG_PIRATE_WEATHER_KEY")?.map(Secret);
+
         Ok(Self {
             bind,
             data_dir,
@@ -157,6 +207,8 @@ impl Config {
             session_secret,
             dev_auth,
             endpoints: Default::default(),
+            weatherkit,
+            pirate_weather_key,
         })
     }
 
@@ -170,6 +222,8 @@ impl Config {
             session_secret: DEV_SESSION_SECRET.to_owned(),
             dev_auth: false,
             endpoints: Default::default(),
+            weatherkit: None,
+            pirate_weather_key: None,
         }
     }
 
@@ -252,6 +306,18 @@ mod tests {
 
     #[test]
     fn rejects_invalid_values() {
+        // WeatherKit: all four or nothing; a broken key fails at startup.
+        assert!(cfg(&[("WITTERUNG_WEATHERKIT_KEY_ID", "ABC")]).is_err());
+        assert!(cfg(&[
+            ("WITTERUNG_WEATHERKIT_KEY", "kein-schlüssel"),
+            ("WITTERUNG_WEATHERKIT_KEY_ID", "ABC"),
+            ("WITTERUNG_WEATHERKIT_TEAM_ID", "T"),
+            ("WITTERUNG_WEATHERKIT_SERVICE_ID", "S"),
+        ])
+        .is_err());
+        assert!(cfg(&[("WITTERUNG_PIRATE_WEATHER_KEY_FILE", "/gibt/es/nicht")]).is_err());
+        let c = cfg(&[("WITTERUNG_PIRATE_WEATHER_KEY", "geheim")]).unwrap();
+        assert!(!format!("{c:?}").contains("geheim"));
         assert!(cfg(&[("WITTERUNG_BIND", "nope")]).is_err());
         assert!(cfg(&[("WITTERUNG_DEV_AUTH", "yes")]).is_err());
         assert!(cfg(&[("WITTERUNG_OIDC_ISSUER", "https://id.example.org")]).is_err());

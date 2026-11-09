@@ -47,8 +47,10 @@ pub async fn create_place(
 /// and quota per provider, attribution. The aggregated forecast comes in M2.
 pub async fn raw(State(app): State<App>, Path(id): Path<i64>) -> AppResult<Json<Value>> {
     let now = Timestamp::now();
+    let app2 = app.clone();
     let body = app
         .blocking(move |c| {
+            let app = app2;
             let Some(place) = db::find_place(c, id)? else {
                 return Ok(None);
             };
@@ -58,6 +60,7 @@ pub async fn raw(State(app): State<App>, Path(id): Path<i64>) -> AppResult<Json<
                 let usage = quota::usage(c, p.name(), p.budget(), now)?;
                 providers.push(json!({
                     "provider": p,
+                    "configured": p.configured(app.config()),
                     "state": state,
                     "quota": usage,
                 }));
@@ -74,7 +77,11 @@ pub async fn raw(State(app): State<App>, Path(id): Path<i64>) -> AppResult<Json<
                     "daily": data["daily"],
                 }));
             }
-            let attribution: Vec<_> = Provider::ALL.iter().map(|p| p.attribution()).collect();
+            let attribution: Vec<_> = Provider::ALL
+                .into_iter()
+                .filter(|p| p.configured(app.config()))
+                .map(|p| p.attribution())
+                .collect();
             Ok(Some(json!({
                 "place": place,
                 "providers": providers,

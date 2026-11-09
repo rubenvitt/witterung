@@ -9,6 +9,8 @@
 
 pub mod bright_sky;
 pub mod open_meteo;
+pub mod pirate_weather;
+pub mod weatherkit;
 
 use jiff::civil::Date;
 use jiff::tz::TimeZone;
@@ -112,7 +114,8 @@ pub struct DayPoint {
     pub temp_max_c: f64,
     pub precip_mm: f64,
     pub precip_prob_pct: Option<f64>,
-    pub wind_max_kmh: f64,
+    /// `None` where the upstream only has a daily mean (WeatherKit, Pirate Weather).
+    pub wind_max_kmh: Option<f64>,
     pub gust_max_kmh: Option<f64>,
     pub condition: Condition,
     pub sunrise: Option<Timestamp>,
@@ -140,6 +143,8 @@ pub enum SourceError {
 pub struct Endpoints {
     pub open_meteo: Url,
     pub bright_sky: Url,
+    pub weatherkit: Url,
+    pub pirate_weather: Url,
 }
 
 impl Default for Endpoints {
@@ -148,6 +153,8 @@ impl Default for Endpoints {
         Self {
             open_meteo: url("https://api.open-meteo.com/v1/"),
             bright_sky: url("https://api.brightsky.dev/"),
+            weatherkit: url("https://weatherkit.apple.com/api/v1/"),
+            pirate_weather: url("https://api.pirateweather.net/"),
         }
     }
 }

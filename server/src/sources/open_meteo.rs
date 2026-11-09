@@ -30,7 +30,7 @@ pub const MODELS: &[(SourceId, &str)] = &[
     (SourceId::IconD2, "dwd_icon_d2_native"),
     (SourceId::IconEu, "dwd_icon_eu_native"),
     (SourceId::EcmwfIfs, "ecmwf_ifs"),
-    (SourceId::Gfs, "gfs_seamless"),
+    (SourceId::Gfs, "ncep_gfs_global"),
 ];
 
 const HOURLY: &[&str] = &[
@@ -184,7 +184,7 @@ pub fn parse(body: &[u8]) -> Result<Vec<SourceData>, SourceError> {
                 temp_max_c: max,
                 precip_mm,
                 precip_prob_pct: d("precipitation_probability_max", i),
-                wind_max_kmh: wind,
+                wind_max_kmh: Some(wind),
                 gust_max_kmh: d("wind_gusts_10m_max", i),
                 condition,
                 sunrise: d("sunrise", i).and_then(unix),

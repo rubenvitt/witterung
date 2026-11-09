@@ -14,7 +14,7 @@ use serde::Serialize;
 use crate::app::App;
 use crate::db::{self, FetchState, Place};
 use crate::quota::{self, Budget, Period};
-use crate::sources::{bright_sky, open_meteo, SourceData, SourceError};
+use crate::sources::{bright_sky, open_meteo, pirate_weather, weatherkit, SourceData, SourceError};
 
 const TICK: Duration = Duration::from_secs(60);
 const BACKOFF_BASE: SignedDuration = SignedDuration::from_secs(60);
@@ -25,6 +25,9 @@ const BACKOFF_BASE: SignedDuration = SignedDuration::from_secs(60);
 pub enum Provider {
     OpenMeteo,
     BrightSky,
+    #[serde(rename = "weatherkit")]
+    WeatherKit,
+    PirateWeather,
 }
 
 /// Attribution the licenses require, shown wherever the data is.
@@ -35,18 +38,37 @@ pub struct Attribution {
 }
 
 impl Provider {
-    pub const ALL: [Provider; 2] = [Provider::OpenMeteo, Provider::BrightSky];
+    pub const ALL: [Provider; 4] = [
+        Provider::OpenMeteo,
+        Provider::BrightSky,
+        Provider::WeatherKit,
+        Provider::PirateWeather,
+    ];
+
+    /// Sources with credentials are off until the credentials are set.
+    pub fn configured(self, config: &crate::Config) -> bool {
+        match self {
+            Provider::OpenMeteo | Provider::BrightSky => true,
+            Provider::WeatherKit => config.weatherkit.is_some(),
+            Provider::PirateWeather => config.pirate_weather_key.is_some(),
+        }
+    }
 
     pub fn name(self) -> &'static str {
         match self {
             Provider::OpenMeteo => "open_meteo",
             Provider::BrightSky => "bright_sky",
+            Provider::WeatherKit => "weatherkit",
+            Provider::PirateWeather => "pirate_weather",
         }
     }
 
     pub fn interval(self) -> SignedDuration {
         match self {
-            Provider::OpenMeteo | Provider::BrightSky => SignedDuration::from_hours(1),
+            Provider::WeatherKit => SignedDuration::from_mins(15),
+            Provider::OpenMeteo | Provider::BrightSky | Provider::PirateWeather => {
+                SignedDuration::from_hours(1)
+            }
         }
     }
 
@@ -62,6 +84,14 @@ impl Provider {
                 quota: 6_000.0,
                 period: Period::Day,
             },
+            Provider::WeatherKit => Budget {
+                quota: 500_000.0,
+                period: Period::Month,
+            },
+            Provider::PirateWeather => Budget {
+                quota: 10_000.0,
+                period: Period::Month,
+            },
         }
     }
 
@@ -69,7 +99,7 @@ impl Provider {
     pub fn weight(self) -> f64 {
         match self {
             Provider::OpenMeteo => open_meteo::request_weight(),
-            Provider::BrightSky => 1.0,
+            Provider::BrightSky | Provider::WeatherKit | Provider::PirateWeather => 1.0,
         }
     }
 
@@ -83,6 +113,15 @@ impl Provider {
                 text: "Quelle: Deutscher Wetterdienst (DWD), abgerufen über Bright Sky",
                 url: "https://www.dwd.de/",
             },
+            // The app shows the Apple Weather mark; the link is mandatory.
+            Provider::WeatherKit => Attribution {
+                text: "Apple Weather",
+                url: "https://developer.apple.com/weatherkit/data-source-attribution/",
+            },
+            Provider::PirateWeather => Attribution {
+                text: "Pirate Weather",
+                url: "https://pirateweather.net/",
+            },
         }
     }
 
@@ -92,7 +131,8 @@ impl Provider {
         place: &Place,
         now: Timestamp,
     ) -> Result<Vec<SourceData>, SourceError> {
-        let endpoints = &app.config().endpoints;
+        let config = app.config();
+        let endpoints = &config.endpoints;
         match self {
             Provider::OpenMeteo => {
                 open_meteo::fetch(app.http(), &endpoints.open_meteo, place.lat, place.lon).await
@@ -100,6 +140,33 @@ impl Provider {
             Provider::BrightSky => {
                 bright_sky::fetch(app.http(), &endpoints.bright_sky, place.lat, place.lon, now)
                     .await
+            }
+            Provider::WeatherKit => {
+                let Some(wk) = &config.weatherkit else {
+                    return Err(SourceError::Http("nicht konfiguriert".into()));
+                };
+                weatherkit::fetch(
+                    app.http(),
+                    &endpoints.weatherkit,
+                    wk,
+                    place.lat,
+                    place.lon,
+                    now,
+                )
+                .await
+            }
+            Provider::PirateWeather => {
+                let Some(key) = &config.pirate_weather_key else {
+                    return Err(SourceError::Http("nicht konfiguriert".into()));
+                };
+                pirate_weather::fetch(
+                    app.http(),
+                    &endpoints.pirate_weather,
+                    &key.0,
+                    place.lat,
+                    place.lon,
+                )
+                .await
             }
         }
     }
@@ -144,7 +211,10 @@ pub async fn poll_once(app: &App, now: Timestamp) {
         }
     };
     for place in &places {
-        for provider in Provider::ALL {
+        for provider in Provider::ALL
+            .into_iter()
+            .filter(|p| p.configured(app.config()))
+        {
             if let Err(e) = poll(app, place, provider, now).await {
                 tracing::error!(error = %e, place = place.id, provider = provider.name(), "poller: bookkeeping failed");
             }

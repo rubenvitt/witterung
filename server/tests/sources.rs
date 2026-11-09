@@ -150,3 +150,76 @@ async fn place_validation_and_unknown_place() {
         "Testort"
     );
 }
+
+#[tokio::test]
+async fn credential_sources_poll_when_configured() {
+    use base64::Engine;
+    use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+
+    const WEATHERKIT: &[u8] = include_bytes!("fixtures/weatherkit/weather.json");
+    const PIRATE: &[u8] = include_bytes!("fixtures/pirate_weather/forecast.json");
+    let app = Router::new()
+        .route(
+            "/wk/weather/de/{lat}/{lon}",
+            get(|headers: axum::http::HeaderMap| async move {
+                let auth = headers[header::AUTHORIZATION].to_str().unwrap();
+                assert!(auth.starts_with("Bearer ey"), "{auth}");
+                WEATHERKIT
+            }),
+        )
+        .route("/pw/forecast/test-key/{coords}", get(|| async { PIRATE }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let pkcs8 = EcdsaKeyPair::generate_pkcs8(
+        &ECDSA_P256_SHA256_FIXED_SIGNING,
+        &ring::rand::SystemRandom::new(),
+    )
+    .unwrap();
+    let key_pem = format!(
+        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----",
+        base64::engine::general_purpose::STANDARD.encode(pkcs8.as_ref())
+    );
+    let s = TestServer::with_config(|c| {
+        c.dev_auth = true;
+        // Unreachable: these two fail, the configured ones must still work.
+        c.endpoints.open_meteo = Url::parse("http://127.0.0.1:9/").unwrap();
+        c.endpoints.bright_sky = Url::parse("http://127.0.0.1:9/").unwrap();
+        c.endpoints.weatherkit = base.join("wk/").unwrap();
+        c.endpoints.pirate_weather = base.join("pw/").unwrap();
+        c.weatherkit = Some(witterung::sources::weatherkit::WeatherKitConfig {
+            key_pem,
+            key_id: "KEY".into(),
+            team_id: "TEAM".into(),
+            service_id: "svc".into(),
+        });
+        c.pirate_weather_key = Some(witterung::config::Secret("test-key".into()));
+    });
+    let r = s
+        .send(
+            Request::post("/api/v1/places")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-witterung-client", "test")
+                .body(Body::from(r#"{"name":"Testort","lat":52.97,"lon":10.56}"#))
+                .unwrap(),
+        )
+        .await;
+    let id = r.json()["id"].as_i64().unwrap();
+    poll_once(&s.app, Timestamp::now()).await;
+
+    let raw = s
+        .get(&format!("/api/v1/places/{id}/raw"), Auth::None)
+        .await
+        .json();
+    let sources: Vec<&str> = raw["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["source"].as_str().unwrap())
+        .collect();
+    assert_eq!(sources, ["pirate_weather", "weatherkit"]);
+    assert_eq!(provider(&raw, "weatherkit")["configured"], true);
+    assert_eq!(provider(&raw, "open_meteo")["state"]["failures"], 1);
+    assert_eq!(raw["attribution"].as_array().unwrap().len(), 4);
+}

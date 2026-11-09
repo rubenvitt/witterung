@@ -72,10 +72,10 @@ Condition       clear | partly_cloudy | cloudy | fog | drizzle | rain | heavy_ra
 
 HourPoint       temp_c, feels_like_c?, precip_mm, precip_prob_pct?, wind_kmh,
                 gust_kmh?, wind_dir_deg?, cloud_pct?, humidity_pct?, pressure_hpa?,
-                condition, is_day
+                condition, is_day?
 
 DayPoint        date (Europe/Berlin), temp_min_c, temp_max_c, precip_mm,
-                precip_prob_pct?, wind_max_kmh, gust_max_kmh?, condition,
+                precip_prob_pct?, wind_max_kmh?, gust_max_kmh?, condition,
                 sunrise?, sunset?
 
 Spread          { min, max } je numerischer Größe; precip_agreement_pct
@@ -108,6 +108,11 @@ bis 10 Tage). Jede Zeile trägt deshalb `n_sources`; eine schmale Spannbreite in
 drei Quellen soll nicht so aussehen wie eine aus sieben. Open-Meteo liefert jenseits der
 Modellreichweite `null` – der Adapter lässt die Quelle dann weg, statt 0 zu setzen.
 
+> **Nachtrag M1 (09.11.2026):** Genaues Format in [schema.md](schema.md). Abweichungen:
+> `is_day` und `wind_max_kmh` sind optional; GFS kommt als `ncep_gfs_global` (nicht
+> `gfs_seamless`, das HRRR enthält und am 30.11.2026 endet); Open-Meteo rechnet mit einem
+> festen UTC-Offset über die Zeitumstellung hinweg. Open-Meteo-Kosten gemessen: 8,4 pro Abruf.
+
 ## 4. Quellen, Abrufplan und Quoten
 
 Annahme: 3 gespeicherte Orte + 1 aktueller Standort = 4 Orte. Den Standort rundet der
@@ -119,7 +124,7 @@ er wird nur abgefragt, solange die App ihn in den letzten 24 h gemeldet hat.
 | WeatherKit | REST, ein Request mit `currentWeather,forecastHourly,forecastDaily,forecastNextHour` | 15 min | 4 × 96 × 30 ≈ 11.500/Monat | 500.000/Monat | ≈ 2 % |
 | Open-Meteo | `/v1/forecast`, 4 Modelle, ~20 Variablen, 10 Tage → Gewicht ≈ 8 | 60 min | 4 × 24 × 8 ≈ 770/Tag | 10.000/Tag | ≈ 8 % |
 | Pirate Weather | `/forecast`, nur gespeicherte Orte | 60 min | 3 × 24 × 30 ≈ 2.160/Monat | 10.000/Monat | ≈ 22 % |
-| Bright Sky | `/weather` (MOSMIX) 60 min, `/current_weather` 10 min, `/alerts` 5 min, `/radar` 5 min | – | 4 × (24 + 144 + 288 + 288) ≈ 3.000/Tag | kein festes Kontingent (Fair Use) → eigene Obergrenze 6.000/Tag | ≈ 50 % der eigenen Grenze; bei Bedarf Radar nur für aktive Orte |
+| Bright Sky | `/weather` (MOSMIX) 60 min, `/current_weather` 10 min, `/alerts` 5 min, `/radar` 5 min | – | 4 × (24 + 144 + 288 + 288) ≈ 3.000/Tag | kein festes Kontingent (Fair Use) → eigene Obergrenze 6.000/Tag | Grenze im Code: 50 % der eigenen Obergrenze = 3.000/Tag. Deshalb ab M2 Radar und Warnungen **einmal für alle Orte** abrufen (Bounding Box bzw. Warnzellen), nicht je Ort |
 
 Durchsetzung im Code (`quota.rs`): jede Quelle hat Budget und Periode als Konstante,
 der Zähler steht in SQLite. Vor jedem Abruf wird gewichtet gebucht; ist die 50-%-Grenze
