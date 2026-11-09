@@ -1,0 +1,102 @@
+name: CI
+
+# Tests on every push and PR; the container image is built for amd64 and
+# arm64 (arm64 is the homelab) every run, but only pushes to main publish it.
+# Pattern taken from zunder.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep in sync with RUST_VERSION in deploy/Dockerfile.
+  RUST_TOOLCHAIN: "1.97"
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  image:
+    name: Container-Image (GHCR, amd64 + arm64)
+    needs: rust
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            # The full SHA without prefix is the tag the server's deploy-agent rolls out.
+            type=sha,format=long,prefix=
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUBLISH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: ${{ env.PUBLISH == 'true' && 'type=gha,mode=max' || '' }}
+
+  # The server fetches the deployment itself (~/server/deploy-agent, pull).
+  # Without an entry there the deployment simply stays queued.
+  deploy:
+    name: Deployment anlegen (r-server)
+    needs: image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      deployments: write
+    steps:
+      - name: Deployment anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/deployments" --input - <<JSON
+          {"ref": "${{ github.sha }}", "environment": "production", "auto_merge": false,
+           "required_contexts": [], "payload": {"tag": "${{ github.sha }}"},
+           "description": "Image ghcr.io/${{ github.repository }}:${{ github.sha }}"}
+          JSON

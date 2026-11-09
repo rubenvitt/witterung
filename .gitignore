@@ -5,3 +5,9 @@ dist/
 build/
 .env
 .env.*
+
+# Lokale Daten und Secrets
+data/
+secrets/
+*.p8
+!.env.example
