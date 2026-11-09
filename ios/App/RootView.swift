@@ -37,6 +37,12 @@ struct RootView: View {
             .sheet(isPresented: $showPlaces) { PlacesView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .fullScreenCover(item: $radarFor) { ref in RadarView(ref: ref) }
+            .onOpenURL { url in
+                // Widget-Tipp: witterung://place/<id|current>
+                guard url.host() == "place", let id = url.pathComponents.last else { return }
+                let ref: PlaceRef = id == "current" ? .current : .saved(Int(id) ?? -1)
+                if model.pages.contains(ref) { model.selection = ref }
+            }
             #if DEBUG
             .task { await openDebugScreen() }
             #endif
