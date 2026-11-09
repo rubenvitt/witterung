@@ -241,19 +241,59 @@ pub async fn status(State(app): State<App>) -> AppResult<Json<Value>> {
     Ok(Json(json!({"providers": providers})))
 }
 
-/// Radar frames for the DWD WMS (5 min, −2 h … +2 h around the last
-/// analysis).
-pub async fn radar() -> Json<Value> {
-    let now = Timestamp::now().as_second();
-    let step = 300;
-    let last_analysis = now.div_euclid(step) * step - step;
-    let frames: Vec<String> = (-24..=24)
-        .filter_map(|k| Timestamp::from_second(last_analysis + k * step).ok())
+const RADAR_LAYER: &str = "Radar_rv_product_1x1km_ger";
+const RADAR_STEP: i64 = 300;
+
+/// End of the layer's time dimension (= last analysis + 2 h forecast),
+/// from the layer's WMS capabilities, cached for 5 minutes.
+async fn radar_end(app: &App) -> Option<Timestamp> {
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<(Timestamp, Timestamp)>> = Mutex::new(None);
+    let now = Timestamp::now();
+    if let Some((at, end)) = *CACHE.lock().unwrap_or_else(|e| e.into_inner()) {
+        if now.duration_since(at) < SignedDuration::from_mins(5) {
+            return Some(end);
+        }
+    }
+    let url = format!(
+        "https://maps.dwd.de/geoserver/dwd/{RADAR_LAYER}/ows?service=WMS&version=1.3.0&request=GetCapabilities"
+    );
+    let body = app.http().get(url).send().await.ok()?.text().await.ok()?;
+    let end = parse_time_end(&body)?;
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((now, end));
+    Some(end)
+}
+
+/// `<Dimension name="time" …>start/END/PT5M` → END.
+fn parse_time_end(capabilities: &str) -> Option<Timestamp> {
+    let dim = capabilities.split("<Dimension name=\"time\"").nth(1)?;
+    let text = dim.split('>').nth(1)?.split('<').next()?;
+    text.split(',')
+        .next_back()?
+        .split('/')
+        .nth(1)?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// Radar frames for the DWD WMS: 5-minute steps, 2 h back from the last
+/// analysis (`now_index`) and the 2 h forecast after it.
+pub async fn radar(State(app): State<App>) -> Json<Value> {
+    let end = match radar_end(&app).await {
+        Some(end) => end.as_second(),
+        // Fallback: analyses appear about 5–10 minutes late.
+        None => {
+            Timestamp::now().as_second().div_euclid(RADAR_STEP) * RADAR_STEP - 2 * RADAR_STEP + 7200
+        }
+    };
+    let frames: Vec<String> = (-48..=0)
+        .filter_map(|k| Timestamp::from_second(end + k * RADAR_STEP).ok())
         .map(|t| t.to_string())
         .collect();
     Json(json!({
         "wms": "https://maps.dwd.de/geoserver/dwd/wms",
-        "layer": "dwd:Radar_rv_product_1x1km_ger",
+        "layer": format!("dwd:{RADAR_LAYER}"),
         "frames": frames,
         "now_index": 24,
         "attribution": "Radar: Deutscher Wetterdienst",
@@ -269,5 +309,18 @@ pub async fn delete_device(State(app): State<App>, Path(id): Path<i64>) -> AppRe
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::NotFound)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn radar_time_end() {
+        let caps = r#"<Layer><Dimension name="time" default="current" units="ISO8601">2026-11-06T00:00:00.000Z/2026-11-09T14:55:00.000Z/PT5M</Dimension></Layer>"#;
+        assert_eq!(
+            super::parse_time_end(caps).unwrap().to_string(),
+            "2026-11-09T14:55:00Z"
+        );
+        assert!(super::parse_time_end("<x/>").is_none());
     }
 }
