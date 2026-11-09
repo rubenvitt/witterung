@@ -249,7 +249,9 @@ pub async fn evaluate(app: &App, now: Timestamp) -> AppResult<()> {
         let alerts: Vec<Alert> = get(ALERTS_KEY)
             .and_then(|j| serde_json::from_str(j).ok())
             .unwrap_or_default();
-        let nowcast: Option<Nowcast> = get(NOWCAST_KEY).and_then(|j| serde_json::from_str(j).ok());
+        let nowcast: Option<Nowcast> = get(NOWCAST_KEY)
+            .and_then(|j| serde_json::from_str::<Nowcast>(j).ok())
+            .filter(|n| now.duration_since(n.at) <= crate::forecast::NOWCAST_MAX_AGE);
         for (key, msg) in due_messages(&place.name, &alerts, nowcast.as_ref(), now) {
             let k = key.clone();
             let fresh = app

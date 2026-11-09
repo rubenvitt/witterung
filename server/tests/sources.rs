@@ -54,7 +54,17 @@ async fn mock_upstreams() -> Url {
                 "/bs/alerts",
                 get(|| async { fresh(ALERTS, "/alerts/0/expires", 24) }),
             )
-            .route("/bs/radar", get(|| async { RADAR })),
+            .route(
+                "/bs/radar",
+                get(|| async {
+                    // Make the fixture's newest radar run 5 minutes old.
+                    let run = (Timestamp::now() - SignedDuration::from_mins(5)).to_string();
+                    String::from_utf8_lossy(RADAR).replace(
+                        "RADARCOMP::RV::2026-11-09T12:35:00+00:00",
+                        &format!("RADARCOMP::RV::{run}"),
+                    )
+                }),
+            ),
     )
     .await
 }

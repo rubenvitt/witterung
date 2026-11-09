@@ -14,7 +14,8 @@ export async function renderWeather(root, param) {
     try {
       const fc = await loadForecast(key, force);
       if (!body.isConnected) return;
-      body.replaceChildren(
+      // replaceChildren would print null as text: drop empty sections.
+      body.replaceChildren(...[
         header(fc),
         alerts(fc.alerts ?? []),
         nowCard(fc),
@@ -22,7 +23,7 @@ export async function renderWeather(root, param) {
         hourlyCard(fc.hourly ?? []),
         dailyCard(fc.daily ?? []),
         attributionBlock(fc),
-      );
+      ].filter(Boolean));
       for (const draw of body.querySelectorAll('[data-chart]')) registerChart(draw.chartDraw);
     } catch (err) {
       if (err.status !== 401) body.replaceChildren(errorBox(err, () => load(true)));

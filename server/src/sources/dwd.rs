@@ -216,6 +216,8 @@ struct Position {
 #[derive(Deserialize)]
 struct RadarFrame {
     timestamp: Timestamp,
+    /// `RADARCOMP::RV::<analysis time>`: the run this frame belongs to.
+    source: Option<String>,
     /// 0.01 mm per 5 minutes, rows × columns around the place.
     precipitation_5: Vec<Vec<f64>>,
 }
@@ -225,11 +227,17 @@ pub async fn fetch_nowcast(
     base: &Url,
     lat: f64,
     lon: f64,
+    now: Timestamp,
 ) -> Result<Nowcast, SourceError> {
+    // Without `date` Bright Sky starts an hour back, i.e. at an old run;
+    // 15 minutes back reaches the newest analysis and its full forecast.
+    let from = Timestamp::from_second(now.as_second().div_euclid(300) * 300 - 900)
+        .map_err(|e| SourceError::Http(e.to_string()))?;
     let mut url = endpoint(base, "radar", lat, lon)?;
     url.query_pairs_mut()
         .append_pair("distance", "2000")
-        .append_pair("format", "plain");
+        .append_pair("format", "plain")
+        .append_pair("date", &from.to_string());
     parse_nowcast(&get_bytes(http, url).await?)
 }
 
@@ -256,10 +264,24 @@ pub fn parse_nowcast(body: &[u8]) -> Result<Nowcast, SourceError> {
             }
         })
         .collect();
-    let at = points
+    let first = points
         .first()
         .map(|p| p.at)
         .ok_or_else(|| SourceError::Parse("keine Radarbilder".into()))?;
+    // The newest run any frame comes from; else the first frame.
+    let at = body
+        .radar
+        .iter()
+        .filter_map(|f| {
+            f.source
+                .as_deref()?
+                .rsplit("::")
+                .next()?
+                .parse::<Timestamp>()
+                .ok()
+        })
+        .max()
+        .unwrap_or(first);
     Ok(Nowcast {
         source: "bright_sky:radar".into(),
         at,
@@ -300,12 +322,13 @@ mod tests {
 
     #[test]
     fn nowcast_reads_the_place_pixel() {
-        // Fixture: 25 frames from 12:35 local; the centre pixel (2,2) gets
-        // 25 (0.25 mm/5 min = 3 mm/h) from 13:10 on.
+        // Fixture: 25 frames from 12:35 local, analyses up to the run of
+        // 12:35Z, forecasts after; the centre pixel (2,2) gets 25
+        // (0.25 mm/5 min = 3 mm/h) from 13:10 local on.
         let n =
             parse_nowcast(include_bytes!("../../tests/fixtures/bright_sky/radar.json")).unwrap();
         assert_eq!(n.points.len(), 25);
-        assert_eq!(n.at.to_string(), "2026-11-09T11:35:00Z");
+        assert_eq!(n.at.to_string(), "2026-11-09T12:35:00Z", "newest run");
         assert_eq!(n.points[6].precip_mm_h, 0.0);
         assert_eq!(n.points[7].precip_mm_h, 3.0);
     }

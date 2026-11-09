@@ -18,7 +18,7 @@ pub const DAYS: i64 = 10;
 /// Older forecast series are left out of the consensus entirely.
 const DROP_AFTER: SignedDuration = SignedDuration::from_hours(12);
 const OBSERVATION_MAX_AGE: SignedDuration = SignedDuration::from_hours(2);
-const NOWCAST_MAX_AGE: SignedDuration = SignedDuration::from_mins(40);
+pub const NOWCAST_MAX_AGE: SignedDuration = SignedDuration::from_mins(40);
 
 #[derive(Debug, Serialize)]
 pub struct Forecast {
@@ -246,9 +246,10 @@ pub fn build(
                     .filter(|o| now.duration_since(o.at) <= OBSERVATION_MAX_AGE);
             }
             NOWCAST_KEY => {
+                // Judged by the radar run, not the fetch: the upstream can lag.
                 nowcast = serde_json::from_str::<Nowcast>(&snap.json)
                     .ok()
-                    .filter(|_| a <= NOWCAST_MAX_AGE);
+                    .filter(|n| now.duration_since(n.at) <= NOWCAST_MAX_AGE);
             }
             ALERTS_KEY => {
                 alerts = serde_json::from_str::<Vec<Alert>>(&snap.json)

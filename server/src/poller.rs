@@ -223,7 +223,7 @@ impl Provider {
                 one(ALERTS_KEY, serde_json::to_string(&a))
             }
             Provider::DwdRadar => {
-                let n = dwd::fetch_nowcast(http, &e.bright_sky, lat, lon).await?;
+                let n = dwd::fetch_nowcast(http, &e.bright_sky, lat, lon, now).await?;
                 one(NOWCAST_KEY, serde_json::to_string(&n))
             }
         }
