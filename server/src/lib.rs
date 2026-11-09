@@ -13,10 +13,9 @@ pub mod poller;
 pub mod push;
 pub mod quota;
 pub mod sources;
+pub mod web;
 
 use axum::extract::State;
-use axum::http::HeaderMap;
-use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use axum::{middleware, Json};
@@ -25,7 +24,7 @@ use serde_json::{json, Value};
 pub use app::App;
 pub use config::Config;
 
-use auth::middleware::{browser_principal, require_auth};
+use auth::middleware::require_auth;
 use auth::Principal;
 use error::AppResult;
 
@@ -62,7 +61,8 @@ pub fn build(config: Config, http: reqwest::Client) -> anyhow::Result<(App, Rout
         )
         .route_layer(middleware::from_fn_with_state(app.clone(), require_auth));
     let router = Router::new()
-        .route("/", get(index))
+        .route("/", get(web::index))
+        .route("/assets/{name}", get(web::asset))
         .route("/health", get(health))
         .merge(auth::routes::routes())
         .merge(auth::device::routes())
@@ -151,32 +151,4 @@ async fn me(principal: Principal) -> Json<Value> {
         Principal::DevAuto => json!({"kind": "dev"}),
         Principal::Device(d) => json!({"kind": "device", "name": d.name, "device_id": d.id}),
     })
-}
-
-/// Placeholder start page until the web app (M7): shows who is logged in.
-async fn index(State(app): State<App>, headers: HeaderMap) -> AppResult<Response> {
-    let Some(principal) = browser_principal(&app, &headers, None).await? else {
-        return Ok(Redirect::to("/auth/login?return_to=/").into_response());
-    };
-    let who = match &principal {
-        Principal::Session(owner) => owner
-            .name
-            .clone()
-            .or_else(|| owner.email.clone())
-            .unwrap_or_else(|| "angemeldet".into()),
-        Principal::DevAuto => "Entwicklungsmodus".into(),
-        Principal::Device(d) => d.name.clone(),
-    };
-    let who = who
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;");
-    Ok(Html(format!(
-        "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\">\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
-         <title>Witterung</title></head>\
-         <body style=\"font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1rem\">\
-         <h1>Witterung</h1><p>Server läuft. Angemeldet: {who}.</p></body></html>"
-    ))
-    .into_response())
 }

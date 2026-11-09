@@ -79,3 +79,36 @@ async fn bearer_tokens_are_refused_until_devices_exist() {
     // even on localhost with dev auth: a token never falls back to anything else
     assert_eq!(s.send(req).await.status, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn web_app_files_with_csp() {
+    let s = TestServer::with_config(|c| {
+        c.dev_auth = true;
+        c.web_dir = c.data_dir.join("web");
+        std::fs::create_dir_all(c.web_dir.join("assets")).unwrap();
+        std::fs::write(c.web_dir.join("index.html"), "<!doctype html>hallo").unwrap();
+        std::fs::write(c.web_dir.join("assets/app.js"), "export {}").unwrap();
+    });
+    let r = s.get("/", Auth::None).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert!(r
+        .header("content-security-policy")
+        .unwrap()
+        .contains("default-src 'self'"));
+    let r = s.get("/assets/app.js", Auth::None).await;
+    assert_eq!(
+        r.header("content-type"),
+        Some("text/javascript; charset=utf-8")
+    );
+    for bad in [
+        "/assets/..%2Findex.html",
+        "/assets/.hidden",
+        "/assets/nope.js",
+    ] {
+        assert_eq!(
+            s.get(bad, Auth::None).await.status,
+            StatusCode::NOT_FOUND,
+            "{bad}"
+        );
+    }
+}

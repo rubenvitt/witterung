@@ -66,8 +66,10 @@ RUN set -eux; \
     mkdir -p /data; \
     chown witterung:witterung /data
 COPY --from=builder /out/witterung /usr/local/bin/
+COPY web/ /app/web/
 ENV WITTERUNG_BIND=0.0.0.0:8080 \
     WITTERUNG_DATA_DIR=/data \
+    WITTERUNG_WEB_DIR=/app/web \
     TZ=Europe/Berlin
 USER witterung
 WORKDIR /data

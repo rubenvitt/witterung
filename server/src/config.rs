@@ -60,6 +60,8 @@ pub struct Config {
     /// Source credentials (env or Docker secrets); a source without them is off.
     pub weatherkit: Option<WeatherKitConfig>,
     pub pirate_weather_key: Option<Secret>,
+    /// Directory with the web app (`index.html`, `assets/`).
+    pub web_dir: PathBuf,
 }
 
 impl Config {
@@ -209,6 +211,7 @@ impl Config {
             endpoints: Default::default(),
             weatherkit,
             pirate_weather_key,
+            web_dir: PathBuf::from(get("WITTERUNG_WEB_DIR").unwrap_or_else(|| "../web".into())),
         })
     }
 
@@ -224,6 +227,7 @@ impl Config {
             endpoints: Default::default(),
             weatherkit: None,
             pirate_weather_key: None,
+            web_dir: PathBuf::from("../web"),
         }
     }
 
