@@ -8,7 +8,7 @@
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
-use jiff::{SignedDuration, Timestamp};
+use jiff::Timestamp;
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde::Deserialize;
@@ -89,7 +89,10 @@ pub fn url(base: &Url, lat: f64, lon: f64, now: Timestamp) -> Result<Url, Source
     let mut url = base
         .join(&format!("weather/de/{lat}/{lon}"))
         .map_err(|e| SourceError::Http(e.to_string()))?;
-    let end = now + SignedDuration::from_hours(HOURS);
+    // Whole hours: fractional seconds in the query are not documented as valid.
+    let hour = now.as_second().div_euclid(3600) * 3600;
+    let end = Timestamp::from_second(hour + HOURS * 3600)
+        .map_err(|e| SourceError::Http(e.to_string()))?;
     url.query_pairs_mut()
         .append_pair("dataSets", "forecastHourly,forecastDaily")
         .append_pair("timezone", "Europe/Berlin")
@@ -334,6 +337,17 @@ mod tests {
             .expect("signature verifies");
         assert!(format!("{config:?}").contains("ABC123DEFG"));
         assert!(!format!("{config:?}").contains("PRIVATE"));
+    }
+
+    #[test]
+    fn url_has_whole_hour_end() {
+        let base = Url::parse("https://weatherkit.apple.com/api/v1/").unwrap();
+        let now: Timestamp = "2026-11-09T11:36:57.289214Z".parse().unwrap();
+        let url = url(&base, 52.9656, 10.5594, now).unwrap();
+        assert_eq!(url.path(), "/api/v1/weather/de/52.9656/10.5594");
+        let q: Vec<(String, String)> = url.query_pairs().into_owned().collect();
+        assert!(q.contains(&("hourlyEnd".into(), "2026-11-11T13:00:00Z".into())));
+        assert!(q.contains(&("timezone".into(), "Europe/Berlin".into())));
     }
 
     #[test]

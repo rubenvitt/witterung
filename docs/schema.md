@@ -8,9 +8,12 @@ Konsens, Spannbreite und das Gesamt-`Forecast` aus plan.md §3 folgen mit M2.
 - °C, mm, km/h, hPa, Prozent als 0–100, Windrichtung in Grad (woher der Wind kommt).
 - Zeitstempel: RFC 3339 in UTC (`2026-11-09T11:00:00Z`), Datum: `JJJJ-MM-TT` in Europe/Berlin.
 - **Stundenkonvention:** `at` ist der Beginn der Stunde. Momentanwerte (Temperatur, Wind,
-  Wolken, Druck) gelten zu `at`; Niederschlag, Niederschlagswahrscheinlichkeit und
-  `condition` beschreiben `at` bis `at + 1 h`. Open-Meteo und Bright Sky stempeln Summen mit
-  dem Ende der Stunde – deren Adapter verschieben sie um eine Stunde nach vorn.
+  Wolken, Druck, Wettercode) gelten zu `at`; Niederschlag, Niederschlagswahrscheinlichkeit und
+  Böen beschreiben `at` bis `at + 1 h`. Open-Meteo (`precipitation`,
+  `precipitation_probability`, `wind_gusts_10m`: „preceding hour“) und Bright Sky (Summen,
+  Böen und die daraus abgeleitete `condition`) stempeln mit dem Ende der Stunde – deren
+  Adapter verschieben diese Werte um eine Stunde nach vorn. Open-Meteos `weather_code` ist
+  laut Doku ein Momentanwert und bleibt bei `at`.
 - Fehlt einer Quelle ein Pflichtwert, fällt die Stunde bzw. der Tag dieser Quelle weg.
   Es wird nie mit 0 aufgefüllt.
 

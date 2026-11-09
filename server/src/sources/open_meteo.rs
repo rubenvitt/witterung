@@ -1,9 +1,9 @@
 //! Open-Meteo `/v1/forecast`: several models in one request; every field
 //! comes back suffixed with the model ID (`temperature_2m_icon_d2_…`).
 //!
-//! Open-Meteo labels precipitation, its probability and the weather code
-//! with the END of the hour (“preceding hour”); the adapter shifts them to
-//! the hour start (see `sources` module docs). A model returns `null` beyond
+//! Open-Meteo labels precipitation, its probability and gusts with the END
+//! of the hour (“preceding hour”, docs: hourly variables table); the adapter
+//! shifts them to the hour start. `weather_code` is instant (read at `at`) (see `sources` module docs). A model returns `null` beyond
 //! its horizon and for days it does not fully cover: such hours and days are
 //! left out, never filled with 0.
 //!
@@ -138,7 +138,7 @@ pub fn parse(body: &[u8]) -> Result<Vec<SourceData>, SourceError> {
                 h("temperature_2m", i),
                 h("wind_speed_10m", i),
                 h("precipitation", i + 1),
-                h("weather_code", i + 1),
+                h("weather_code", i),
             ) else {
                 continue;
             };
@@ -152,7 +152,7 @@ pub fn parse(body: &[u8]) -> Result<Vec<SourceData>, SourceError> {
                 precip_mm,
                 precip_prob_pct: h("precipitation_probability", i + 1),
                 wind_kmh,
-                gust_kmh: h("wind_gusts_10m", i),
+                gust_kmh: h("wind_gusts_10m", i + 1),
                 wind_dir_deg: h("wind_direction_10m", i),
                 cloud_pct: h("cloud_cover", i),
                 humidity_pct: h("relative_humidity_2m", i),
@@ -262,9 +262,9 @@ mod tests {
         // Fixture hour 0 is 2026-11-09 00:00 Europe/Berlin = 23:00 UTC.
         assert_eq!(first.at.to_string(), "2026-11-08T23:00:00Z");
         assert_eq!(first.temp_c, 3.0);
-        // The weather code at index 1 (00–01 local) belongs to hour 0.
-        assert_eq!(first.condition, Condition::Cloudy);
-        assert_eq!(ecmwf.hourly[1].condition, Condition::PartlyCloudy);
+        // weather_code is instant: index 0 (code 2) belongs to hour 0.
+        assert_eq!(first.condition, Condition::PartlyCloudy);
+        assert_eq!(ecmwf.hourly[1].condition, Condition::Cloudy);
         assert_eq!(first.is_day, Some(false));
         // 8 hours of input give 7 points: the last hour has no sum.
         assert_eq!(ecmwf.hourly.len(), 7);

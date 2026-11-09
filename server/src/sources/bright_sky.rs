@@ -124,7 +124,8 @@ pub fn parse(body: &[u8]) -> Result<SourceData, SourceError> {
             precip_mm,
             precip_prob_pct: next.precipitation_probability,
             wind_kmh,
-            gust_kmh: now.wind_gust_speed,
+            // Gusts are the maximum of the preceding hour, like the sums.
+            gust_kmh: next.wind_gust_speed,
             wind_dir_deg: now.wind_direction,
             cloud_pct: now.cloud_cover,
             humidity_pct: now.relative_humidity,
