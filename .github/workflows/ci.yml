@@ -95,8 +95,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api "repos/${{ github.repository }}/deployments" --input - <<JSON
+          id=$(gh api "repos/${{ github.repository }}/deployments" --jq .id --input - <<JSON
           {"ref": "${{ github.sha }}", "environment": "production", "auto_merge": false,
            "required_contexts": [], "payload": {"tag": "${{ github.sha }}"},
            "description": "Image ghcr.io/${{ github.repository }}:${{ github.sha }}"}
           JSON
+          )
+          gh api "repos/${{ github.repository }}/deployments/$id/statuses" -f state=queued > /dev/null

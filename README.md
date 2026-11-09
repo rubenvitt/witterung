@@ -31,14 +31,14 @@ erzeugten RSA-Schlüsseln).
 1. **Pocket ID:** OIDC-Client anlegen, Callback `https://witterung.rubeen.dev/auth/callback`,
    vertraulicher Client (mit Secret).
 2. **DNS:** `witterung.rubeen.dev` muss auf den Server zeigen.
-3. **Stack:** `deploy/compose.yaml` nach `~/server/witterung/` kopieren, daneben `.env` aus
+3. **Stack:** `deploy/docker-compose.yml` nach `~/server/witterung/` kopieren, in `server.sh` (`SERVICES`) registrieren, daneben `.env` aus
    `deploy/.env.example` befüllen und `data/` anlegen (`sudo chown 10001:10001 data`).
    Das Image ist privat: einmal `docker login ghcr.io -u rubenvitt`.
 4. `docker compose up -d`, dann `https://witterung.rubeen.dev` öffnen und anmelden.
 
 Jeder Push auf `main` baut `ghcr.io/rubenvitt/witterung` für amd64 und arm64 und legt ein
 GitHub-Deployment an. Ausgerollt wird es nur, wenn Witterung im `deploy-agent` eingetragen
-ist; sonst von Hand: `docker compose pull && docker compose up -d`.
+ist (`~/server/deploy-agent/targets`); sonst von Hand: `~/server/server.sh update witterung`.
 
 ### Konfiguration
 

@@ -1,0 +1,40 @@
+name: witterung
+
+# Quelle: github.com/rubenvitt/witterung (deploy/docker-compose.yml, README).
+# Liegt auf dem Server als ~/server/witterung/docker-compose.yml (+ .env, data/).
+# Öffentlich unter witterung.rubeen.dev, damit das iPhone unterwegs ohne VPN zugreift;
+# geschützt über Pocket ID.
+
+networks:
+  proxy:
+    external: true
+
+services:
+  witterung:
+    # Gebaut von GitHub Actions. Jeder grüne Push auf main wird ein GitHub-Deployment;
+    # ~/server/deploy-agent setzt DEPLOY_TAG (Commit-SHA) in .env und rollt aus.
+    image: ghcr.io/rubenvitt/witterung:${DEPLOY_TAG:-latest}
+    container_name: witterung
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - WITTERUNG_PUBLIC_URL=https://witterung.rubeen.dev
+      - WITTERUNG_BIND=0.0.0.0:8080
+      - WITTERUNG_DATA_DIR=/data
+      - TZ=Europe/Berlin
+    volumes:
+      # Container läuft als uid/gid 10001 — data/ gehört deshalb 10001:10001.
+      - ./data:/data
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.witterung-http.entrypoints=http"
+      - "traefik.http.routers.witterung-http.rule=Host(`witterung.rubeen.dev`)"
+      - "traefik.http.routers.witterung-http.middlewares=redirect-to-https@file"
+      - "traefik.http.routers.witterung.entrypoints=https"
+      - "traefik.http.routers.witterung.rule=Host(`witterung.rubeen.dev`)"
+      - "traefik.http.routers.witterung.tls=true"
+      - "traefik.http.routers.witterung.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.witterung.middlewares=gzip@file"
+      - "traefik.http.services.witterung.loadbalancer.server.port=8080"
