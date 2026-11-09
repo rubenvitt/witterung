@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#11161c" media="(prefers-color-scheme: dark)">
+  <title>Witterung</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/leaflet.css">
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/leaflet.js" defer></script>
+  <script type="module" src="/assets/app.js"></script>
+</head>
+<body>
+  <svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <path id="p-cloud-top" d="M7.5 15h9.2a3.6 3.6 0 0 0 .3-7.2A5.2 5.2 0 0 0 7.1 9 3 3 0 0 0 7.5 15z"/>
+    </defs>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.6A7.8 7.8 0 0 1 9.4 4.5a7.8 7.8 0 1 0 10.1 10.1z"/></symbol>
+    <symbol id="i-cloud-sun" viewBox="0 0 24 24"><circle cx="8.5" cy="8.5" r="3"/><path d="M8.5 2.5v1.3M2.5 8.5h1.3M4.3 4.3l.9.9M12.7 4.3l-.9.9M4.3 12.7l.9-.9"/><path d="M10 20.5h7.6a3.2 3.2 0 0 0 .2-6.4 4.6 4.6 0 0 0-8.6.9A2.8 2.8 0 0 0 10 20.5z"/></symbol>
+    <symbol id="i-cloud-moon" viewBox="0 0 24 24"><path d="M12.4 9.3A5 5 0 0 1 6.2 3.1a5 5 0 1 0 6.2 6.2z"/><path d="M10 20.5h7.6a3.2 3.2 0 0 0 .2-6.4 4.6 4.6 0 0 0-8.6.9A2.8 2.8 0 0 0 10 20.5z"/></symbol>
+    <symbol id="i-cloudy" viewBox="0 0 24 24"><path d="M7 19h10.2a4 4 0 0 0 .3-8A6 6 0 0 0 6 12.3 3.4 3.4 0 0 0 7 19z"/></symbol>
+    <symbol id="i-fog" viewBox="0 0 24 24"><path d="M7.5 11.5h9.2a3.6 3.6 0 0 0 .3-7.2A5.2 5.2 0 0 0 7.1 5.5"/><path d="M3.5 14.5h17M5.5 18h13M8 21.5h8"/></symbol>
+    <symbol id="i-drizzle" viewBox="0 0 24 24"><use href="#p-cloud-top"/><path d="M9 18.5v.01M12.5 19.5v.01M16 18.5v.01M10.8 21.5v.01M14.3 21.5v.01"/></symbol>
+    <symbol id="i-rain" viewBox="0 0 24 24"><use href="#p-cloud-top"/><path d="M9.5 17.5l-1 3M13 17.5l-1 3M16.5 17.5l-1 3"/></symbol>
+    <symbol id="i-heavy_rain" viewBox="0 0 24 24"><use href="#p-cloud-top"/><path d="M8 17.5l-1.5 4.5M11.3 17.5l-1.5 4.5M14.6 17.5l-1.5 4.5M17.9 17.5l-1.5 4.5"/></symbol>
+    <symbol id="i-snow" viewBox="0 0 24 24"><use href="#p-cloud-top"/><path d="M9 18l1 1M10 18l-1 1M14 18l1 1M15 18l-1 1M11.5 21l1 1M12.5 21l-1 1"/></symbol>
+    <symbol id="i-sleet" viewBox="0 0 24 24"><use href="#p-cloud-top"/><path d="M9.5 17.5l-1 3M15.5 17.5l-1 3M12 19.5v.01M11 22v.01"/></symbol>
+    <symbol id="i-hail" viewBox="0 0 24 24"><use href="#p-cloud-top"/><circle cx="9" cy="19" r=".9"/><circle cx="13" cy="20.5" r=".9"/><circle cx="16.5" cy="18.5" r=".9"/></symbol>
+    <symbol id="i-thunderstorm" viewBox="0 0 24 24"><use href="#p-cloud-top"/><path d="M12.8 16l-2.3 3.4h3l-2.3 3.4"/></symbol>
+    <symbol id="i-wind" viewBox="0 0 24 24"><path d="M3 9h10.5a2.8 2.8 0 1 0-2.8-2.8M3 13h15a3 3 0 1 1-3 3M3 17h6"/></symbol>
+    <symbol id="i-warning" viewBox="0 0 24 24"><path d="M12 3.5L2.5 20h19L12 3.5z"/><path d="M12 10v4.5M12 17.3v.01"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6.5-5.8-6.5-11a6.5 6.5 0 0 1 13 0c0 5.2-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 4v15M7 14.5l5 5 5-5"/></symbol>
+    <symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 3.5s-6 6.6-6 10.9a6 6 0 0 0 12 0C18 10.1 12 3.5 12 3.5z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5L8 5.5z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8.5 5.5v13M15.5 5.5v13"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4v4h-4"/></symbol>
+    <symbol id="i-compare" viewBox="0 0 24 24"><path d="M4 20V10M9.3 20V4M14.6 20v-7M20 20V8"/></symbol>
+    <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12l6-6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"/></symbol>
+  </svg>
+
+  <a class="skip-link" href="#main">Zum Inhalt springen</a>
+  <header class="topbar">
+    <a class="brand" href="#/wetter">
+      <svg class="icon brand-icon" aria-hidden="true"><use href="#i-cloud-sun"/></svg>
+      <span>Witterung</span>
+    </a>
+    <nav class="mainnav" aria-label="Hauptnavigation">
+      <a href="#/wetter" data-view="wetter"><svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg><span>Wetter</span></a>
+      <a href="#/vergleich" data-view="vergleich"><svg class="icon" aria-hidden="true"><use href="#i-compare"/></svg><span>Quellen</span></a>
+      <a href="#/radar" data-view="radar"><svg class="icon" aria-hidden="true"><use href="#i-radar"/></svg><span>Radar</span></a>
+      <a href="#/verwaltung" data-view="verwaltung"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Verwaltung</span></a>
+    </nav>
+  </header>
+  <main id="main" tabindex="-1">
+    <p class="loading">Lädt …</p>
+  </main>
+  <noscript><p class="error-box">Witterung braucht JavaScript.</p></noscript>
+</body>
+</html>
