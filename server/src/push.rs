@@ -71,7 +71,13 @@ pub async fn put_settings(
                 return Err(AppError::BadRequest("ntfy_url muss http(s) sein".into()));
             }
         }
-        s.ntfy_url = Some(url).filter(|u| !u.is_empty());
+        let url = Some(url).filter(|u| !u.is_empty());
+        // A token never follows a changed address unless given again: else a
+        // stolen login could redirect the token to a server of its choosing.
+        if url != s.ntfy_url && u.token.is_none() {
+            s.token = None;
+        }
+        s.ntfy_url = url;
     }
     if let Some(topic) = u.topic {
         let topic = topic.trim().to_owned();
