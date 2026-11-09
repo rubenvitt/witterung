@@ -4,7 +4,7 @@ Persönliche Wetter-App als Ersatz für Carrot Weather: ein Aggregator auf dem H
 kombiniert Apple WeatherKit, Open-Meteo (mehrere Modelle), Bright Sky/DWD und Pirate
 Weather, zeigt Konsens und Spannbreite und beliefert eine SwiftUI-App mit Widgets.
 
-Stand: Entwurf zur Freigabe. Gebaut wird erst nach OK.
+Stand: freigegeben am 09.11.2026 (Entscheidungen in Abschnitt 8).
 
 ## 1. Vorab geprüft (09.11.2026)
 
@@ -156,7 +156,7 @@ Jeder Meilenstein endet mit einem lauffähigen, getesteten, gepushten Stand.
 | M3 | iOS-App: Anmeldung, Orte + Standort, Jetzt, 48 h, 10 Tage, Nowcast-Diagramm, Warnungen, Quellenvergleich, Offline-Cache, Attributionsseite | MVP-Umfang für Uelzen auf dem iPhone korrekt |
 | M4 | Widgets: Home + Lockscreen, Temperatur, Symbol, Regenhinweis; Timeline aus dem Cache. Prüfen: Muss die Apple-Weather-Kennzeichnung auch ins Widget? | Widget aktualisiert sich ohne App-Start → **MVP fertig**, README komplett |
 | M5 | Regenradar-Karte mit Zeitleiste. Erst prüfen: `lagemonitor` nutzt den DWD-GeoServer-WMS (`maps.dwd.de`, Layer `dwd:Niederschlagsradar`) in Web-Mercator – das spart die Umprojektion; offen ist, ob der WMS eine Zeitdimension inkl. Nowcast hat | soll |
-| M6 | Push über ntfy: Warnung neu, Regenbeginn in < 30 min | soll |
+| M6 | ntfy auf dem Server aufsetzen; Push: Warnung neu, Regenbeginn in < 30 min | soll |
 | M7 | Webapp (schlanke Ansicht derselben API) | soll |
 | später | Watch, Pollen/Luftqualität, Prognose-Archiv und Quellen-Rückblick | kann |
 
@@ -164,7 +164,7 @@ Jeder Meilenstein endet mit einem lauffähigen, getesteten, gepushten Stand.
 
 1. **Das MVP war zu groß und blieb nach M2 liegen.** Gegenmittel: M0–M2 sind schon
    allein nützlich (API im Browser), M3 beginnt mit nur einer Ansicht. Carrot läuft
-   parallel weiter, bis feststeht, woran ich die Kündigung festmache (offene Frage 4).
+   parallel weiter, bis das Kündigungskriterium aus Abschnitt 8 erfüllt ist.
 2. **Xcode-/iOS-Updates brechen App und Widget.** Gegenmittel: keine Drittabhängigkeiten
    in der App, nur SwiftUI, WidgetKit, Swift Charts, MapKit.
 3. **Eine Quelle ändert ihre API still** (siehe ICON-D2-Abschaltung). Gegenmittel:
@@ -174,16 +174,12 @@ Jeder Meilenstein endet mit einem lauffähigen, getesteten, gepushten Stand.
 5. **Konsens wirkt präziser, als er ist.** Gegenmittel: Spannbreite ist immer sichtbar,
    nicht nur der Median.
 
-## 8. Offene Fragen vor dem Start
+## 8. Entscheidungen (09.11.2026)
 
-1. **Domain:** öffentlich (z. B. `witterung.rubeen.dev` wie zunder, damit das iPhone
-   unterwegs ohne VPN zugreift) oder nur intern/Tailscale? Empfehlung: öffentlich, hinter
-   Pocket ID.
-2. **ntfy (M6):** gibt es schon eine Instanz im Homelab, oder ntfy.sh?
-3. **Secrets:** Die Vorgabe sagt env/Docker-Secrets; sonst gilt bei eigenen Diensten
-   „Konfiguration in der App, Env nur Bootstrap“. Vorschlag oben: nur die Quellen-Zugänge
-   als Secrets, alles andere in der App. Passt das?
-4. **Carrot kündigen:** Woran machst du fest, dass Witterung reicht?
-5. **Warnungen nur vom DWD:** Die Vorgabe nennt WeatherKit auch für Warnungen. Der Plan
-   nimmt sie ausschließlich von Bright Sky/DWD (amtlich, keine Doppelungen, keine
-   WeatherKit-Auflagen für Warnungstexte und Detail-Links). Einverstanden?
+1. **Domain:** `witterung.rubeen.dev`, öffentlich hinter Pocket ID (Empfehlung übernommen,
+   nicht ausdrücklich bestätigt).
+2. **ntfy:** gibt es noch nicht; M6 setzt ntfy auf dem Server neu auf.
+3. **Secrets:** wie vorgeschlagen – Quellen-Zugänge als Secrets, alles andere in der App.
+4. **Carrot kündigen, wenn:** „die App liefert korrektes Wetter und ist wirklich usable
+   mit sehr guter UX“.
+5. **Warnungen:** ausschließlich vom DWD.

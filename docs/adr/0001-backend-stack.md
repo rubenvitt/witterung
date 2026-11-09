@@ -1,6 +1,6 @@
 # ADR 0001: Backend in Rust (axum, SQLite)
 
-- Status: vorgeschlagen
+- Status: angenommen (09.11.2026)
 - Datum: 2026-11-09
 
 ## Kontext
@@ -12,9 +12,9 @@ nebenher mit wenig Aufwand pflegbar bleiben. Es gibt genau einen Nutzer.
 
 Im eigenen Portfolio laufen bereits Rust-Dienste mit genau diesem Zuschnitt:
 
-- `zunder`: axum + sqlx/SQLite, Pocket-ID-Login für das Web, Geräte-Token per OAuth
+- `zunder`: axum + rusqlite/SQLite, Pocket-ID-Login für das Web, Geräte-Token per OAuth
   Authorization Code mit PKCE für native Apps, CI baut amd64 + arm64 nach GHCR.
-- `drk/lagemonitor`: axum, Poller, Bright-Sky-Adapter (Wetter, Radar).
+- `drk/lagemonitor`: axum, sqlx, Poller, Bright-Sky-Adapter (Wetter, Radar).
 
 ## Optionen
 
@@ -35,7 +35,7 @@ fängt aber bei null an.
 
 ## Entscheidung
 
-Rust mit axum, tokio, reqwest (rustls) und sqlx auf SQLite. Ein Crate, ein Binary,
+Rust mit axum, tokio, reqwest (rustls) und rusqlite (SQLite, gebündelt). rusqlite statt sqlx, weil der übernommene Auth-Code aus `zunder` darauf aufsetzt. Ein Crate, ein Binary,
 ein Container. Die Anmeldung (Pocket ID fürs Web, Geräte-Token für die App) wird aus
 `zunder` übernommen, das CI-Muster für arm64-Images ebenso.
 
