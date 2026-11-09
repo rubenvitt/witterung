@@ -84,25 +84,32 @@ def rebased_forecast():
 
 
 def status():
+    """Like the real server: timestamps in ms, Bright Sky feeds share the quota account "bright_sky"."""
     n = now()
+    ms = lambda d: int(d.timestamp() * 1000)
+    def row(provider, ok, ago, interval, used, limit, period, account=None, error=None):
+        return {"provider": provider, "configured": True, "ok": ok, "last_success_at": ms(n - ago), "error": error,
+                "interval_s": interval, "quota": {"used": used, "limit": limit, "period": period},
+                "quota_account": account or provider}
+    m = lambda x: timedelta(minutes=x)
     return {"providers": [
-        {"provider": "open_meteo", "configured": True, "ok": True, "last_success_at": iso(n - timedelta(minutes=31)),
-         "error": None, "quota": {"used": 412.8, "limit": 5000, "period": "day"}},
-        {"provider": "bright_sky", "configured": True, "ok": True, "last_success_at": iso(n - timedelta(minutes=4)),
-         "error": None, "quota": {"used": 2210, "limit": 3000, "period": "day"}},
-        {"provider": "weatherkit", "configured": True, "ok": True, "last_success_at": iso(n - timedelta(minutes=8)),
-         "error": None, "quota": {"used": 3104, "limit": 250000, "period": "month"}},
-        {"provider": "pirate_weather", "configured": True, "ok": False,
-         "last_success_at": iso(n - timedelta(hours=5, minutes=12)), "error": "HTTP 503 Service Unavailable",
-         "quota": {"used": 1840, "limit": 5000, "period": "month"}},
+        row("open_meteo", True, m(31), 3600, 412.8, 5000, "day"),
+        row("bright_sky", True, m(4), 3600, 2210, 3000, "day"),
+        row("weatherkit", True, m(8), 900, 3104, 250000, "month"),
+        row("pirate_weather", False, m(312), 3600, 1840, 5000, "month", error="HTTP 503 Service Unavailable"),
+        row("dwd_observation", True, m(6), 600, 2210, 3000, "day", "bright_sky"),
+        row("dwd_alerts", True, m(2), 300, 2210, 3000, "day", "bright_sky"),
+        row("dwd_radar", True, m(3), 300, 2210, 3000, "day", "bright_sky"),
     ]}
 
 
 def radar():
     n = now()
-    start = n.replace(second=0, microsecond=0) - timedelta(minutes=n.minute % 5) - timedelta(hours=2)
+    # Like the server's fallback: the last analysis is about 10 min old, 24 frames back, 24 ahead.
+    last = n.replace(second=0, microsecond=0) - timedelta(minutes=n.minute % 5 + 10)
     return {"wms": "https://maps.dwd.de/geoserver/dwd/wms", "layer": "dwd:Radar_rv_product_1x1km_ger",
-            "frames": [iso(start + timedelta(minutes=5 * i)) for i in range(49)]}
+            "frames": [iso(last + timedelta(minutes=5 * (i - 24))) for i in range(49)],
+            "now_index": 24, "attribution": "Radar: Deutscher Wetterdienst"}
 
 
 class Handler(BaseHTTPRequestHandler):

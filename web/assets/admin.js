@@ -131,11 +131,15 @@ const PERIOD = { day: 'heute', month: 'diesen Monat' };
 async function statusSection(el) {
   const st = await api('/api/v1/status');
   const providers = Array.isArray(st) ? st : st?.providers ?? [];
+  // Feeds sharing one upstream account (quota_account) show the quota once, at the first feed.
+  const shownAccounts = new Set();
   el.replaceChildren(
     h('h2', null, 'Quellen und Kontingente'),
     h('ul', { class: 'provider-list' }, providers.map((p) => {
       const [cls, label] = !p.configured ? ['off', 'Nicht eingerichtet'] : p.ok === false || p.error ? ['bad', 'Fehler'] : ['good', 'OK'];
-      const q = p.quota;
+      const account = p.quota_account ?? p.provider;
+      const q = !p.configured || shownAccounts.has(account) ? null : p.quota;
+      if (q) shownAccounts.add(account);
       const share = q?.limit ? Math.min(1, q.used / q.limit) : 0;
       const fill = h('span', { class: `meter-fill ${share >= 0.9 ? 'is-high' : share >= 0.7 ? 'is-mid' : ''}` });
       fill.style.width = `${share * 100}%`;
@@ -144,19 +148,23 @@ async function statusSection(el) {
           h('strong', null, providerName(p.provider)),
           h('span', { class: `badge badge-${cls}` }, label)),
         p.configured && h('p', { class: 'muted small' },
-          p.last_success_at ? `Zuletzt erfolgreich ${relative(p.last_success_at)} (${dayTime(p.last_success_at)})` : 'Noch kein erfolgreicher Abruf'),
+          p.last_success_at ? `Zuletzt erfolgreich ${relative(p.last_success_at)} (${dayTime(p.last_success_at)})` : 'Noch kein erfolgreicher Abruf',
+          p.interval_s ? ` · Takt ${interval(p.interval_s)}` : ''),
         p.error && h('p', { class: 'source-error small' }, p.error),
         q && [
           h('div', {
-            class: 'meter', role: 'progressbar', 'aria-label': `Kontingent ${providerName(p.provider)}`,
+            class: 'meter', role: 'progressbar', 'aria-label': `Kontingent ${providerName(account)}`,
             'aria-valuemin': '0', 'aria-valuemax': String(q.limit), 'aria-valuenow': String(q.used),
           }, fill),
           h('p', { class: 'muted small' },
             `${num(q.used, q.used % 1 ? 1 : 0)} von ${num(q.limit)} ${PERIOD[q.period] ?? q.period} (UTC) · ${num(share * 100)} %`),
-        ]);
+        ],
+        !q && p.configured && p.quota && h('p', { class: 'muted small' }, `Kontingent zählt bei ${providerName(account)}.`));
     })),
     h('p', { class: 'muted small' }, 'Grenze = 50 % des Kontingents der Quelle; darüber liefert der Server den letzten Stand.'));
 }
+
+const interval = (s) => (s % 3600 === 0 ? `${s / 3600} h` : s % 60 === 0 ? `${s / 60} min` : `${s} s`);
 
 // --- Notifications -----------------------------------------------------------------
 

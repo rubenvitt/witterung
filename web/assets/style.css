@@ -504,3 +504,4 @@ table.data { border-collapse: separate; border-spacing: 0; font-size: 0.85rem; w
   .place-row .switch { justify-self: end; }
 }
 .grid-rain { stroke: var(--rain-light); stroke-dasharray: 2 4; }
+.card > .btn { justify-self: start; }

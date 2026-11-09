@@ -24,8 +24,11 @@ export async function renderRadar(root, param) {
   }
 
   const now = Date.now();
-  let current = Math.max(0, frames.findLastIndex((f) => new Date(f) <= now));
-  const nowIndex = current;
+  // now_index = last analysis (server, from the DWD capabilities); later frames are forecast.
+  const nowIndex = Number.isInteger(radar.now_index)
+    ? Math.min(radar.now_index, frames.length - 1)
+    : Math.max(0, frames.findLastIndex((f) => new Date(f) <= now));
+  let current = nowIndex;
 
   const mapEl = h('div', { class: 'map', role: 'region', 'aria-label': 'Radarkarte' });
   const label = h('output', { class: 'frame-label', 'aria-live': 'off' });

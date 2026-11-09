@@ -129,6 +129,9 @@ export const PROVIDER_NAMES = {
   bright_sky: 'Bright Sky (DWD)',
   weatherkit: 'Apple WeatherKit',
   pirate_weather: 'Pirate Weather',
+  dwd_observation: 'DWD-Messwerte',
+  dwd_alerts: 'DWD-Warnungen',
+  dwd_radar: 'DWD-Radar',
 };
 export const providerName = (p) => PROVIDER_NAMES[p] ?? p;
 
