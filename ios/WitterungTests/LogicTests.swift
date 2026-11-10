@@ -104,6 +104,16 @@ struct WMSTileTests {
         #expect(q["CRS"] == "EPSG:3857" && q["VERSION"] == "1.3.0" && q["WIDTH"] == "512")
         #expect(q["TIME"] == "2026-11-09T12:00:00Z")
     }
+
+    /// MapKit cached Kacheln pro Template: jeder Zeitpunkt braucht ein eigenes.
+    @Test func templatePerFrame() {
+        let base = URL(string: "https://maps.dwd.de/geoserver/dwd/wms")!
+        let layer = "dwd:Radar_rv_product_1x1km_ger"
+        let a = WMSTile.template(base: base, layer: layer, time: NowcastTests.start)
+        let b = WMSTile.template(base: base, layer: layer, time: NowcastTests.start.addingTimeInterval(300))
+        #expect(a != b)
+        #expect(a.contains("2026-11-09T12:00:00Z"))
+    }
 }
 
 struct FormattingTests {

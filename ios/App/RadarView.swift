@@ -10,7 +10,7 @@ final class RadarTileOverlay: MKTileOverlay {
         self.base = base
         self.layer = layer
         self.time = time
-        super.init(urlTemplate: nil)
+        super.init(urlTemplate: WMSTile.template(base: base, layer: layer, time: time))
         tileSize = CGSize(width: 256, height: 256)
         canReplaceMapContent = false
     }

@@ -12,6 +12,13 @@ enum WMSTile {
         return (minX, maxY - size, minX + size, maxY)
     }
 
+    /// Eindeutiges URL-Template je Bild. MapKit cached Kacheln pro Template; mit
+    /// `urlTemplate: nil` teilen sich alle Zeitpunkte einen Cache und jedes Bild zeigt
+    /// die zuerst geladenen Kacheln (meist „jetzt“). Die echte URL liefert `url(…)`.
+    static func template(base: URL, layer: String, time: Date) -> String {
+        "\(base.absoluteString)?LAYERS=\(layer)&TIME=\(time.formatted(.iso8601))&tile={z}/{x}/{y}"
+    }
+
     static func url(base: URL, layer: String, time: Date, x: Int, y: Int, z: Int, pixels: Int = 512) -> URL {
         let b = bbox(x: x, y: y, z: z)
         var url = base
