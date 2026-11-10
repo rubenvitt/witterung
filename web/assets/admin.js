@@ -1,10 +1,11 @@
-// Admin view: places, provider status and quotas, ntfy notifications, devices.
+// Admin view: places, provider status and quotas, ntfy notifications, devices,
+// connected MCP apps.
 
 import { api, h, icon, num, relative, dayTime, providerName, notice, errorBox } from '/assets/util.js';
 import { getPlaces, invalidate, geolocate } from '/assets/app.js';
 
 export async function renderAdmin(root) {
-  const sections = [placesSection, statusSection, notificationsSection, devicesSection].map((build) => {
+  const sections = [placesSection, statusSection, notificationsSection, devicesSection, connectionsSection].map((build) => {
     const el = h('section', { class: 'card' });
     const run = async () => {
       el.replaceChildren(h('p', { class: 'loading' }, 'Lädt …'));
@@ -285,4 +286,39 @@ async function devicesSection(el, reload) {
       : h('p', { class: 'muted' }, 'Keine Geräte angemeldet.'),
     msg,
     form);
+}
+
+// --- Connected apps (MCP via OAuth) ---------------------------------------------------
+
+async function connectionsSection(el, reload) {
+  const connections = await api('/api/v1/connections');
+  const msg = h('p', { class: 'notice', role: 'status' });
+  el.replaceChildren(
+    h('h2', null, 'Verbundene Apps'),
+    h('p', { class: 'muted small' },
+      'Apps mit Zugriff auf den MCP-Endpunkt ',
+      h('code', null, `${location.origin}/mcp`),
+      ', etwa ein Connector in claude.ai. Claude Code verbindet sich stattdessen mit einem Geräte-Token.'),
+    connections.length
+      ? h('ul', { class: 'device-list' }, connections.map((c) => h('li', null,
+        h('div', null,
+          h('strong', null, c.name),
+          h('p', { class: 'muted small' },
+            `Verbunden ${dayTime(c.created_at)}`,
+            c.last_used_at && ` · zuletzt aktiv ${relative(c.last_used_at)}`)),
+        h('button', {
+          type: 'button', class: 'btn btn-danger',
+          onclick: async () => {
+            if (!confirm(`„${c.name}“ trennen? Die App muss sich danach neu verbinden.`)) return;
+            try {
+              await api(`/api/v1/connections/${encodeURIComponent(c.id)}`, { method: 'DELETE' });
+              await reload();
+              notice(el.querySelector('.notice'), `„${c.name}“ getrennt.`);
+            } catch (err) {
+              if (err.status !== 401) notice(msg, err.message, 'error');
+            }
+          },
+        }, 'Trennen'))))
+      : h('p', { class: 'muted' }, 'Keine Apps verbunden.'),
+    msg);
 }

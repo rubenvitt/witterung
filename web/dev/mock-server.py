@@ -46,6 +46,7 @@ state = {
     "notifications": {"ntfy_url": "https://ntfy.example.org", "topic": "witterung-x7k2q9", "enabled": True,
                       "token_set": True},
     "devices": None,  # filled relative to now at startup
+    "connections": None,  # filled relative to now at startup
 }
 
 
@@ -281,6 +282,13 @@ class Handler(BaseHTTPRequestHandler):
                    "created_at": iso(now()), "last_used_at": None}
             state["devices"].append(dev)
             return self.json(201, {"token": "wt_mock" + secrets.token_urlsafe(24), "device_id": dev["id"]})
+        if path == "/connections" and method == "GET":
+            return self.json(200, state["connections"])
+        m = re.fullmatch(r"/connections/([A-Za-z0-9_-]+)", path)
+        if m and method == "DELETE":
+            before = len(state["connections"])
+            state["connections"] = [c for c in state["connections"] if c["id"] != m[1]]
+            return self.send(204) if len(state["connections"]) < before else self.error(404, "nicht gefunden")
         m = re.fullmatch(r"/devices/(\d+)", path)
         if m and method == "DELETE":
             before = len(state["devices"])
@@ -305,6 +313,10 @@ def main():
     state["devices"] = [
         {"id": 7, "name": "iPhone", "created_at": iso(n - timedelta(days=12)), "last_used_at": iso(n - timedelta(minutes=3))},
         {"id": 9, "name": "iPad", "created_at": iso(n - timedelta(days=2)), "last_used_at": iso(n - timedelta(hours=20))},
+    ]
+    state["connections"] = [
+        {"id": "mockclient1", "name": "Claude", "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+         "created_at": iso(n - timedelta(days=1)), "last_used_at": iso(n - timedelta(minutes=10))},
     ]
     print(f"Witterung-Mock: http://localhost:{args.port}/")
     ThreadingHTTPServer(("127.0.0.1", args.port), Handler).serve_forever()

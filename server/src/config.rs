@@ -242,6 +242,12 @@ impl Config {
         !(self.public_url.scheme() == "http" && is_loopback_url(&self.public_url))
     }
 
+    /// The origin of the public URL (`https://host[:port]`), as browsers
+    /// send it in the `Origin` header.
+    pub fn public_origin(&self) -> String {
+        self.public_url.origin().ascii_serialization()
+    }
+
     /// The OIDC redirect URI (`<public_url>/auth/callback`).
     pub fn oidc_redirect_uri(&self) -> Url {
         self.public_url
