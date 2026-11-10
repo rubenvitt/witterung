@@ -21,6 +21,13 @@ Anfragen mit Cookie brauchen den Header `X-Witterung-Client: web`.
    `200 {"token":"wt_…","device_id":7}`. Token im Schlüsselbund ablegen.
 4. Alle API-Aufrufe: `Authorization: Bearer wt_…`. 401 → Token verworfen, neu anmelden.
 
+**Ohne Browser (z. B. Mac-Menüleiste):** Das Token erzeugt die Web-App unter Verwaltung →
+Geräte, also `POST /api/v1/devices` mit `{"name"}` (1–60 Zeichen) → `201 {"token":"wt_…",
+"device_id":7}`. Das geht nur mit Browser-Sitzung; mit einem Geräte-Token kommt `403`. Ohne
+Oberfläche geht dasselbe auf dem Server: `docker exec witterung witterung device-add <Name>` gibt
+`wt_…` auf stdout aus. Das Token wird in beiden Fällen nur einmal gezeigt. Danach wie oben
+`Authorization: Bearer wt_…`; das Gerät steht in der Geräteliste und ist dort widerrufbar.
+
 `GET /api/v1/devices` listet Geräte, `DELETE /api/v1/devices/{id}` widerruft eins.
 
 ## Orte

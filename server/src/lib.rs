@@ -46,7 +46,10 @@ pub fn build(config: Config, http: reqwest::Client) -> anyhow::Result<(App, Rout
         .route("/api/v1/forecast", get(api::location_forecast))
         .route("/api/v1/status", get(api::status))
         .route("/api/v1/radar", get(api::radar))
-        .route("/api/v1/devices", get(api::list_devices))
+        .route(
+            "/api/v1/devices",
+            get(api::list_devices).post(api::create_device),
+        )
         .route(
             "/api/v1/settings/notifications",
             get(push::get_settings).put(push::put_settings),

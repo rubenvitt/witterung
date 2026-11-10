@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::app::{now_ms, App};
+use crate::auth::{device, Principal};
 use crate::db::{self, Device, Place, PlaceUpdate};
 use crate::error::{AppError, AppResult};
 use crate::forecast::{self, Forecast, Snapshot};
@@ -302,6 +303,42 @@ pub async fn radar(State(app): State<App>) -> Json<Value> {
 
 pub async fn list_devices(State(app): State<App>) -> AppResult<Json<Vec<Device>>> {
     Ok(Json(app.blocking(db::list_devices).await?))
+}
+
+#[derive(Deserialize)]
+pub struct NewDevice {
+    name: String,
+}
+
+/// Token for a client without a browser (e.g. the Mac menu bar), shown once.
+/// Only a browser session may do this: a device token must not mint more.
+pub async fn create_device(
+    State(app): State<App>,
+    principal: Principal,
+    Json(new): Json<NewDevice>,
+) -> AppResult<(StatusCode, Json<Value>)> {
+    let subject = match principal {
+        Principal::Session(owner) => owner.subject,
+        Principal::DevAuto => None,
+        Principal::Device(_) => {
+            return Err(AppError::Forbidden(
+                "Geräte-Token können keine weiteren Token erzeugen".into(),
+            ))
+        }
+    };
+    let name = new.name.trim().to_owned();
+    if !device::valid_name(&name) {
+        return Err(AppError::BadRequest("Name: 1 bis 60 Zeichen".into()));
+    }
+    let key = app.config().session_secret.clone();
+    let (token, id) = app
+        .blocking(move |c| device::issue_token(c, &key, &name, subject.as_deref(), now_ms()))
+        .await?;
+    tracing::info!(device = id, "device token created in the web app");
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({"token": token, "device_id": id})),
+    ))
 }
 
 pub async fn delete_device(State(app): State<App>, Path(id): Path<i64>) -> AppResult<StatusCode> {

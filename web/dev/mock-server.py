@@ -14,6 +14,7 @@ import copy
 import json
 import mimetypes
 import re
+import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -272,6 +273,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(204)
         if path == "/devices" and method == "GET":
             return self.json(200, state["devices"])
+        if path == "/devices" and method == "POST":
+            name = str((self.body() or {}).get("name", "")).strip()
+            if not 1 <= len(name) <= 60:
+                return self.error(400, "Name: 1 bis 60 Zeichen")
+            dev = {"id": max([d["id"] for d in state["devices"]] + [0]) + 1, "name": name,
+                   "created_at": iso(now()), "last_used_at": None}
+            state["devices"].append(dev)
+            return self.json(201, {"token": "wt_mock" + secrets.token_urlsafe(24), "device_id": dev["id"]})
         m = re.fullmatch(r"/devices/(\d+)", path)
         if m and method == "DELETE":
             before = len(state["devices"])

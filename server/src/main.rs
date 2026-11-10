@@ -15,6 +15,9 @@ Aufruf:
                           mit „notify“ gleich mit Push-Benachrichtigungen
   witterung notify-set URL TOPIC
                           ntfy einrichten und einschalten; Token (optional) auf stdin
+  witterung device-add NAME
+                          Gerät ohne Browser-Anmeldung anlegen (z. B. die Mac-Leiste);
+                          gibt das Bearer-Token einmalig auf stdout aus
   witterung --version     Version ausgeben";
 
 #[tokio::main]
@@ -67,6 +70,26 @@ async fn main() -> ExitCode {
             );
             Ok(())
         }),
+        ["device-add", name] => {
+            let name = name.trim();
+            admin(|c| {
+                let secret = Config::from_env()?.session_secret;
+                anyhow::ensure!(
+                    witterung::auth::device::valid_name(name),
+                    "Name: 1 bis 60 Zeichen"
+                );
+                let (token, id) = witterung::auth::device::issue_token(
+                    c,
+                    &secret,
+                    name,
+                    None,
+                    witterung::app::now_ms(),
+                )?;
+                eprintln!("Gerät {id} angelegt: {name} (widerrufbar unter Geräte)");
+                println!("{token}");
+                Ok(())
+            })
+        }
         ["--version" | "-V"] => {
             println!("witterung {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
