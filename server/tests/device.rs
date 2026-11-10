@@ -155,3 +155,38 @@ async fn start_requires_login_and_a_valid_challenge() {
         .await;
     assert_ne!(r.status, StatusCode::SEE_OTHER);
 }
+
+#[tokio::test]
+async fn cli_issued_token_works_and_is_revocable() {
+    let s = TestServer::with_config(|c| c.dev_auth = true);
+    let conn = witterung::db::open(&s.app.config().db_path()).unwrap();
+    let (token, id) = witterung::auth::device::issue_token(
+        &conn,
+        &s.app.config().session_secret,
+        "Mac-Leiste",
+        None,
+        witterung::app::now_ms(),
+    )
+    .unwrap();
+    assert!(token.starts_with("wt_"));
+
+    let me = s.send(bearer("/api/v1/me", &token)).await;
+    assert_eq!(me.status, StatusCode::OK);
+    assert_eq!(me.json()["name"], "Mac-Leiste");
+
+    let devices = s.get("/api/v1/devices", Auth::None).await.json();
+    assert_eq!(devices[0]["id"].as_i64(), Some(id));
+    let del = s
+        .send(
+            Request::delete(format!("/api/v1/devices/{id}"))
+                .header("x-witterung-client", "test")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(del.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        s.send(bearer("/api/v1/me", &token)).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+}

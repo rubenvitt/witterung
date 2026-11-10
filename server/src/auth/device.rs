@@ -7,6 +7,9 @@
 //! 2. `POST /auth/device/approve` (that page's form; the Lax session cookie is
 //!    not sent cross-site, the Origin is checked too) → `witterung://auth?code=…`.
 //! 3. `POST /auth/device/token {code, verifier}` → `{token, device_id}`.
+//!
+//! Clients without a browser (the Mac menu bar) get their token from the CLI
+//! instead: `witterung device-add NAME` calls [`issue_token`] directly.
 
 use axum::extract::{Query, State};
 use axum::http::header::{CACHE_CONTROL, LOCATION, ORIGIN};
@@ -18,7 +21,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::middleware::browser_principal;
-use super::{constant_time_eq, pkce_challenge, random_secret, Principal};
+use super::{constant_time_eq, pkce_challenge, random_secret, session_hash, Principal};
 use crate::app::{now_ms, App};
 use crate::db;
 use crate::error::{AppError, AppResult};
@@ -197,11 +200,25 @@ async fn token(State(app): State<App>, Json(req): Json<TokenRequest>) -> AppResu
     if !constant_time_eq(pkce_challenge(v).as_bytes(), challenge.as_bytes()) {
         return Err(AppError::BadRequest("verifier passt nicht".into()));
     }
-    let token = format!("{TOKEN_PREFIX}{}", random_secret());
-    let token_hash = app.secret_hash(&token);
-    let id = app
-        .blocking(move |c| db::insert_device(c, &name, &token_hash, subject.as_deref(), now))
+    let key = app.config().session_secret.clone();
+    let (token, id) = app
+        .blocking(move |c| issue_token(c, &key, &name, subject.as_deref(), now))
         .await?;
     tracing::info!(device = id, "device signed in");
     Ok(Json(json!({"token": token, "device_id": id})))
+}
+
+/// Creates a device and returns its new bearer token (shown once, stored
+/// only as HMAC with `session_secret`) and its id.
+pub fn issue_token(
+    conn: &rusqlite::Connection,
+    session_secret: &str,
+    name: &str,
+    subject: Option<&str>,
+    now: i64,
+) -> anyhow::Result<(String, i64)> {
+    let token = format!("{TOKEN_PREFIX}{}", random_secret());
+    let hash = session_hash(session_secret.as_bytes(), &token);
+    let id = db::insert_device(conn, name, &hash, subject, now)?;
+    Ok((token, id))
 }

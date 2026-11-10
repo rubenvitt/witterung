@@ -70,6 +70,8 @@ dem Server per `docker exec`:
 
 ```fish
 docker exec witterung witterung place-add Uelzen 52.9656 10.5594 notify
+# Token für einen Client ohne Browser (z. B. die Mac-Menüleiste), steht nur einmal auf stdout:
+docker exec witterung witterung device-add Mac-Leiste
 # ntfy (läuft als eigener Dienst ~/server/ntfy, Zugangsdaten dort in credentials.txt):
 grep '^token:' ~/server/ntfy/credentials.txt | cut -d' ' -f2 | tr -d '\n' \
   | docker exec -i witterung witterung notify-set http://ntfy:80 witterung
