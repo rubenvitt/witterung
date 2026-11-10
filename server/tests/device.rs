@@ -190,3 +190,56 @@ async fn cli_issued_token_works_and_is_revocable() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+fn create(name: &str, auth: Option<&str>) -> Request<Body> {
+    let r = Request::post("/api/v1/devices")
+        .header("x-witterung-client", "web")
+        .header(header::CONTENT_TYPE, "application/json");
+    let r = match auth {
+        Some(token) => r
+            .header(header::HOST, "witterung.example.org")
+            .header(header::AUTHORIZATION, format!("Bearer {token}")),
+        None => r,
+    };
+    r.body(Body::from(format!(r#"{{"name":"{name}"}}"#)))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn web_app_creates_tokens_but_devices_cannot() {
+    let s = TestServer::with_config(|c| c.dev_auth = true);
+    let r = s.send(create("  Mac-Leiste ", None)).await;
+    assert_eq!(r.status, StatusCode::CREATED, "{}", r.text());
+    let token = r.json()["token"].as_str().unwrap().to_owned();
+    let me = s.send(bearer("/api/v1/me", &token)).await;
+    assert_eq!(me.json()["name"], "Mac-Leiste");
+
+    assert_eq!(
+        s.send(create("", None)).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        s.send(create(&"x".repeat(61), None)).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    // A device token must not mint further tokens.
+    assert_eq!(
+        s.send(create("Zweitgerät", Some(&token))).await.status,
+        StatusCode::FORBIDDEN
+    );
+    // Cookie/dev requests without the CSRF header are refused.
+    let no_csrf = Request::post("/api/v1/devices")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"name":"X"}"#))
+        .unwrap();
+    assert_ne!(s.send(no_csrf).await.status, StatusCode::CREATED);
+    assert_eq!(
+        s.get("/api/v1/devices", Auth::None)
+            .await
+            .json()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}

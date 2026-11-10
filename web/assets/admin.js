@@ -221,6 +221,45 @@ async function notificationsSection(el, reload) {
 async function devicesSection(el, reload) {
   const devices = await api('/api/v1/devices');
   const msg = h('p', { class: 'notice', role: 'status' });
+  // Token for a client without a browser (e.g. the Mac menu bar). The server
+  // stores only its hash, so it is shown exactly once, right here.
+  const form = h('form', { class: 'device-form' },
+    h('h3', null, 'Token für ein Gerät ohne Browser'),
+    h('label', { class: 'field' },
+      h('span', null, 'Name'),
+      h('input', { name: 'name', type: 'text', required: true, maxlength: '60', autocomplete: 'off', placeholder: 'z. B. Mac-Leiste' })),
+    h('div', { class: 'form-actions' },
+      h('button', { type: 'submit', class: 'btn btn-primary' }, 'Token erzeugen')));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = form.elements.name.value.trim();
+    try {
+      const { token } = await api('/api/v1/devices', { method: 'POST', body: { name } });
+      await reload();
+      const out = h('input', { type: 'text', readonly: true, value: token, 'aria-label': `Token für ${name}`, onfocus: (ev) => ev.target.select() });
+      const shown = h('p', { class: 'notice', role: 'status' });
+      el.append(h('div', { class: 'device-form token-box' },
+        h('h3', null, `Token für „${name}“`),
+        out,
+        h('div', { class: 'form-actions' },
+          h('button', {
+            type: 'button', class: 'btn',
+            onclick: async () => {
+              try {
+                await navigator.clipboard.writeText(token);
+                notice(shown, 'Kopiert.');
+              } catch {
+                out.select();
+                notice(shown, 'Kopieren nicht erlaubt – Token ist markiert.', 'info');
+              }
+            },
+          }, 'Kopieren')),
+        h('p', { class: 'muted small' }, 'Wird nur jetzt angezeigt. Verloren? Gerät widerrufen und neu erzeugen.'),
+        shown));
+    } catch (err) {
+      if (err.status !== 401) notice(msg, err.message, 'error');
+    }
+  });
   el.replaceChildren(
     h('h2', null, 'Geräte'),
     devices.length
@@ -244,5 +283,6 @@ async function devicesSection(el, reload) {
           },
         }, 'Widerrufen'))))
       : h('p', { class: 'muted' }, 'Keine Geräte angemeldet.'),
-    msg);
+    msg,
+    form);
 }

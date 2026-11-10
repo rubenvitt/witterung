@@ -75,7 +75,7 @@ async fn main() -> ExitCode {
             admin(|c| {
                 let secret = Config::from_env()?.session_secret;
                 anyhow::ensure!(
-                    !name.is_empty() && name.chars().count() <= 60,
+                    witterung::auth::device::valid_name(name),
                     "Name: 1 bis 60 Zeichen"
                 );
                 let (token, id) = witterung::auth::device::issue_token(

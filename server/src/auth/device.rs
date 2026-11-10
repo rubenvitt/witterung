@@ -8,8 +8,9 @@
 //!    not sent cross-site, the Origin is checked too) → `witterung://auth?code=…`.
 //! 3. `POST /auth/device/token {code, verifier}` → `{token, device_id}`.
 //!
-//! Clients without a browser (the Mac menu bar) get their token from the CLI
-//! instead: `witterung device-add NAME` calls [`issue_token`] directly.
+//! Clients without a browser (the Mac menu bar) get their token from the web
+//! app (`POST /api/v1/devices`) or the CLI (`witterung device-add NAME`) instead;
+//! both call [`issue_token`] directly.
 
 use axum::extract::{Query, State};
 use axum::http::header::{CACHE_CONTROL, LOCATION, ORIGIN};
@@ -206,6 +207,11 @@ async fn token(State(app): State<App>, Json(req): Json<TokenRequest>) -> AppResu
         .await?;
     tracing::info!(device = id, "device signed in");
     Ok(Json(json!({"token": token, "device_id": id})))
+}
+
+/// Name rule for devices created by hand (web app, CLI).
+pub fn valid_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().count() <= 60 && !name.chars().any(char::is_control)
 }
 
 /// Creates a device and returns its new bearer token (shown once, stored
