@@ -1,4 +1,4 @@
-//! Witterung server: login, health, and (from M1) the weather API.
+//! Witterung server: login, health, the weather API and the MCP endpoint.
 
 pub mod api;
 pub mod app;
@@ -9,6 +9,8 @@ pub mod db;
 pub mod error;
 pub mod forecast;
 pub mod healthcheck;
+pub mod mcp;
+pub mod oauth;
 pub mod poller;
 pub mod push;
 pub mod quota;
@@ -62,6 +64,11 @@ pub fn build(config: Config, http: reqwest::Client) -> anyhow::Result<(App, Rout
             "/api/v1/devices/{id}",
             axum::routing::delete(api::delete_device),
         )
+        .route("/api/v1/connections", get(api::list_connections))
+        .route(
+            "/api/v1/connections/{id}",
+            axum::routing::delete(api::delete_connection),
+        )
         .route_layer(middleware::from_fn_with_state(app.clone(), require_auth));
     let router = Router::new()
         .route("/", get(web::index))
@@ -69,8 +76,12 @@ pub fn build(config: Config, http: reqwest::Client) -> anyhow::Result<(App, Rout
         .route("/health", get(health))
         .merge(auth::routes::routes())
         .merge(auth::device::routes())
+        .merge(mcp::routes())
         .merge(api)
-        .with_state(app.clone());
+        .with_state(app.clone())
+        .merge(oauth::routes::routes(oauth::routes::OAuthState::new(
+            app.clone(),
+        )));
     Ok((app, router))
 }
 
@@ -85,9 +96,13 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     poller::spawn(app);
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(%bind, "listening");
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // The peer address feeds the rate limit of the OAuth client registration.
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 

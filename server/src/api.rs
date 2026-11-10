@@ -18,7 +18,7 @@ use crate::quota;
 /// Grid for the current location (≈ 2 km), so small moves hit the cache.
 const GRID: f64 = 0.02;
 
-fn check_coords(lat: f64, lon: f64) -> AppResult<()> {
+pub fn check_coords(lat: f64, lon: f64) -> AppResult<()> {
     if (-90.0..=90.0).contains(&lat) && (-180.0..=180.0).contains(&lon) {
         Ok(())
     } else {
@@ -28,7 +28,7 @@ fn check_coords(lat: f64, lon: f64) -> AppResult<()> {
     }
 }
 
-fn check_name(name: &str) -> AppResult<String> {
+pub fn check_name(name: &str) -> AppResult<String> {
     let name = name.trim();
     if name.is_empty() || name.chars().count() > 80 {
         return Err(AppError::BadRequest("Name: 1 bis 80 Zeichen".into()));
@@ -89,7 +89,8 @@ pub async fn delete_place(State(app): State<App>, Path(id): Path<i64>) -> AppRes
     }
 }
 
-async fn forecast_for(app: &App, place: Place) -> AppResult<Forecast> {
+/// The aggregated forecast of a stored place.
+pub async fn forecast_for(app: &App, place: Place) -> AppResult<Forecast> {
     let id = place.id;
     let (snapshots, states) = app
         .blocking(move |c| {
@@ -144,9 +145,16 @@ pub async fn location_forecast(
     State(app): State<App>,
     Query(q): Query<Coords>,
 ) -> AppResult<Json<Forecast>> {
-    check_coords(q.lat, q.lon)?;
+    Ok(Json(forecast_at(&app, q.lat, q.lon).await?))
+}
+
+/// Forecast for arbitrary coordinates: snapped to a ≈ 2 km grid and kept as
+/// a `current` place (polled while requested within 24 h); the first request
+/// fetches the free sources right away.
+pub async fn forecast_at(app: &App, lat: f64, lon: f64) -> AppResult<Forecast> {
+    check_coords(lat, lon)?;
     let snap = |v: f64| ((v / GRID).round() * GRID * 1e4).round() / 1e4;
-    let (lat, lon) = (snap(q.lat), snap(q.lon));
+    let (lat, lon) = (snap(lat), snap(lon));
     let (place, empty) = app
         .blocking(move |c| {
             let place = db::current_place(c, lat, lon, now_ms())?;
@@ -156,7 +164,7 @@ pub async fn location_forecast(
         .await?;
     if empty {
         poller::poll_place(
-            &app,
+            app,
             &place,
             &[
                 Provider::OpenMeteo,
@@ -169,7 +177,7 @@ pub async fn location_forecast(
         )
         .await;
     }
-    Ok(Json(forecast_for(&app, place).await?))
+    forecast_for(app, place).await
 }
 
 /// Everything stored for a place, unmerged (debugging, source comparison).
@@ -212,34 +220,37 @@ pub async fn raw(State(app): State<App>, Path(id): Path<i64>) -> AppResult<Json<
 
 /// Per provider: configured, last state across places, quota.
 pub async fn status(State(app): State<App>) -> AppResult<Json<Value>> {
+    Ok(Json(json!({"providers": provider_status(&app).await?})))
+}
+
+/// The provider list of [`status`].
+pub async fn provider_status(app: &App) -> AppResult<Vec<Value>> {
     let now = Timestamp::now();
     let config = app.config().clone();
-    let providers = app
-        .blocking(move |c| {
-            let places = db::list_places(c)?;
-            let mut out = Vec::new();
-            for p in Provider::ALL {
-                let states: Vec<db::FetchState> = places
-                    .iter()
-                    .map(|pl| db::fetch_state(c, pl.id, p.name()))
-                    .collect::<anyhow::Result<_>>()?;
-                let last_success = states.iter().filter_map(|s| s.last_success_at).max();
-                let error = states.iter().find_map(|s| s.error.clone());
-                out.push(json!({
-                    "provider": p,
-                    "configured": p.configured(&config),
-                    "ok": p.configured(&config) && error.is_none(),
-                    "last_success_at": last_success,
-                    "error": error,
-                    "interval_s": p.interval().as_secs(),
-                    "quota": quota::usage(c, p.quota_key(), p.budget(), now)?,
-                    "quota_account": p.quota_key(),
-                }));
-            }
-            Ok(out)
-        })
-        .await?;
-    Ok(Json(json!({"providers": providers})))
+    app.blocking(move |c| {
+        let places = db::list_places(c)?;
+        let mut out = Vec::new();
+        for p in Provider::ALL {
+            let states: Vec<db::FetchState> = places
+                .iter()
+                .map(|pl| db::fetch_state(c, pl.id, p.name()))
+                .collect::<anyhow::Result<_>>()?;
+            let last_success = states.iter().filter_map(|s| s.last_success_at).max();
+            let error = states.iter().find_map(|s| s.error.clone());
+            out.push(json!({
+                "provider": p,
+                "configured": p.configured(&config),
+                "ok": p.configured(&config) && error.is_none(),
+                "last_success_at": last_success,
+                "error": error,
+                "interval_s": p.interval().as_secs(),
+                "quota": quota::usage(c, p.quota_key(), p.budget(), now)?,
+                "quota_account": p.quota_key(),
+            }));
+        }
+        Ok(out)
+    })
+    .await
 }
 
 const RADAR_LAYER: &str = "Radar_rv_product_1x1km_ger";
@@ -339,6 +350,32 @@ pub async fn create_device(
         StatusCode::CREATED,
         Json(json!({"token": token, "device_id": id})),
     ))
+}
+
+/// OAuth clients with a live grant on `/mcp` (claude.ai connectors and
+/// the like).
+pub async fn list_connections(State(app): State<App>) -> AppResult<Json<Vec<db::OAuthClient>>> {
+    let now = now_ms();
+    Ok(Json(
+        app.blocking(move |c| db::connected_oauth_clients(c, now))
+            .await?,
+    ))
+}
+
+/// Disconnects an OAuth client: removes it with all its tokens.
+pub async fn delete_connection(
+    State(app): State<App>,
+    Path(id): Path<String>,
+) -> AppResult<StatusCode> {
+    if app
+        .blocking(move |c| db::delete_oauth_client(c, &id))
+        .await?
+    {
+        tracing::info!("OAuth client disconnected in the web app");
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::NotFound)
+    }
 }
 
 pub async fn delete_device(State(app): State<App>, Path(id): Path<i64>) -> AppResult<StatusCode> {

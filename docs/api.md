@@ -125,3 +125,54 @@ seit über 3 h nichts geliefert hat.
 `"token_set": true`). `POST /api/v1/settings/notifications/test` schickt eine Testnachricht.
 Ausgelöst wird bei neuer DWD-Warnung (ab `moderate`) und bei Regenbeginn in < 30 min laut
 Radar, je Ort mit `notify: true`.
+
+## MCP (Agenten)
+
+`POST /mcp`: MCP-Server für Claude und andere Agenten (Streamable HTTP, JSON-RPC 2.0,
+Protokollversion `2025-06-18`, auch `2025-03-26`). Zustandslos, ohne Server-Stream (`GET` → 405).
+Anfragen bekommen `200` mit JSON, reine Benachrichtigungen `202` ohne Inhalt; Batches gehen.
+
+Anmeldung nur per `Authorization: Bearer …`, Cookies und Dev-Anmeldung zählen hier nicht:
+
+- **Geräte-Token** `wt_…` (Web-App unter Verwaltung → Geräte oder `witterung device-add`), für
+  Clients mit festem Header wie Claude Code.
+- **OAuth-Access-Token** `woa_…` aus dem eingebauten Autorisierungsserver, für Clients ohne festen
+  Header wie Connectoren in claude.ai.
+
+Ohne gültiges Token kommt `401` mit `WWW-Authenticate: Bearer resource_metadata="<public>/.well-known/oauth-protected-resource"`.
+Ein mitgeschickter `Origin` muss `WITTERUNG_PUBLIC_URL` sein (sonst `403`).
+
+| Werkzeug | Zweck |
+|---|---|
+| `list_places` | gespeicherte Orte |
+| `get_forecast` | `place` (ID oder Name) oder `lat`/`lon`; `hours` 0–48 (24), `days` 0–10 (7), `by_source` |
+| `get_alerts` | DWD-Warnungen eines Orts oder aller gespeicherten Orte |
+| `get_source_status` | Zustand und Kontingent der Quellen (wie `/api/v1/status`) |
+| `create_place`, `update_place`, `delete_place` | Orte verwalten (wie `/api/v1/places`) |
+
+`get_forecast` liefert dieselbe Aggregation wie `/api/v1/…/forecast`, aber für ein Sprachmodell
+geformt: Zeiten in Europe/Berlin mit Offset, Felder ohne Wert fehlen, Werte je Quelle nur mit
+`by_source`, der Nowcast als Satz (`summary`, Punkte nur bei Niederschlag). Freie Koordinaten
+werden wie `/api/v1/forecast` auf ≈ 2 km gerundet und 24 h mitgepollt. Fehler eines Werkzeugs sind
+Ergebnisse mit `isError: true` und deutscher Meldung, Protokollfehler JSON-RPC-Fehler.
+
+### OAuth (claude.ai)
+
+Witterung ist für `/mcp` Ressourcen- und Autorisierungsserver zugleich (OAuth 2.1, MCP Authorization):
+
+| | |
+|---|---|
+| `GET /.well-known/oauth-protected-resource[/mcp]` | RFC 9728, `resource` = `<public>/mcp` |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414 |
+| `POST /oauth/register` | dynamische Registrierung (RFC 7591), nur öffentliche Clients; Redirect-URIs https, http auf localhost oder App-Schema; 10 je Stunde und Adresse, 200 insgesamt |
+| `GET /oauth/authorize` | Code-Flow mit PKCE S256; ohne Sitzung über die Pocket-ID-Anmeldung, dann Freigabeseite |
+| `POST /oauth/token` | `authorization_code` und `refresh_token` |
+| `POST /oauth/revoke` | RFC 7009 |
+
+Codes gelten 5 min und einmal (eine Wiederholung widerruft, was mit ihnen ausgestellt wurde).
+Access-Tokens gelten 1 h, Refresh-Tokens 30 Tage und rotieren; ein zweites Mal eingelöster
+Refresh-Token trennt die Verbindung. Gespeichert wird nur ein HMAC der Tokens.
+
+`GET /api/v1/connections` listet die verbundenen Apps (`[{"id","name","redirect_uris",
+"created_at","last_used_at"}]`, nur mit gültiger Freigabe), `DELETE /api/v1/connections/{id}`
+trennt eine samt allen Tokens.

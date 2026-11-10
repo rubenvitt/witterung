@@ -8,13 +8,16 @@ Stand: **M0–M7 umgesetzt**: Server (Quellen, Konsens, Jetzt/Nowcast/Warnungen,
 Geräte-Anmeldung), iOS-App mit Widgets und Radarkarte ([ios/README.md](ios/README.md)) und
 Web-App unter `/` ([web/README.md](web/README.md)). WeatherKit und Pirate Weather warten auf ihre
 Zugänge.
+Dazu ein MCP-Server unter `/mcp`, damit Claude Vorhersagen, Warnungen und Orte abfragen kann
+(siehe [MCP verbinden](#mcp-verbinden)).
 API: [docs/api.md](docs/api.md), Format und Quellen: [docs/schema.md](docs/schema.md).
 Plan und Meilensteine: [docs/plan.md](docs/plan.md), Stack-Entscheidung:
 [ADR 0001](docs/adr/0001-backend-stack.md).
 
 ```
 iPhone-App / Widget ─┐
-Browser ─────────────┼─► Traefik ─► witterung (Rust, SQLite) ─► WeatherKit, Open-Meteo,
+Browser ─────────────┤
+Claude (MCP) ────────┼─► Traefik ─► witterung (Rust, SQLite) ─► WeatherKit, Open-Meteo,
                      │   (TLS)       Pocket-ID-Login              Bright Sky/DWD, Pirate Weather
 ```
 
@@ -80,3 +83,27 @@ grep '^token:' ~/server/ntfy/credentials.txt | cut -d' ' -f2 | tr -d '\n' \
 Push kommt über die ntfy-App (Server `https://ntfy.rubeen.dev`, Topic `witterung`, Konto
 `iphone` aus `credentials.txt`): neue DWD-Warnung ab Stufe 2 und Regen in < 30 min laut Radar,
 für Orte mit `notify`. Die Datenbank wird nachts nach `data/backups/` gesichert (7 Tage).
+
+## MCP verbinden
+
+Endpunkt: `https://witterung.rubeen.dev/mcp` (Streamable HTTP). Werkzeuge: `list_places`,
+`get_forecast`, `get_alerts`, `get_source_status`, `create_place`, `update_place`, `delete_place`
+(Details in [docs/api.md](docs/api.md#mcp-agenten)).
+
+**claude.ai** (und die Claude-Apps): Einstellungen → Connectoren → Eigenen Connector hinzufügen,
+URL `https://witterung.rubeen.dev/mcp`, sonst nichts eintragen. claude.ai registriert sich selbst
+(OAuth), schickt dich über die Pocket-ID-Anmeldung auf eine Freigabeseite, und nach „Erlauben“
+steht der Connector bereit. Trennen geht in der Web-App unter Verwaltung → Verbundene Apps.
+
+**Claude Code:** Mit einem Geräte-Token (Web-App unter Verwaltung → Geräte oder
+`docker exec witterung witterung device-add Claude-Code`):
+
+```sh
+claude mcp add --transport http --scope user witterung https://witterung.rubeen.dev/mcp \
+  --header "Authorization: Bearer wt_…"
+```
+
+Ohne Anmeldung erreichbar sind dafür nur die OAuth-Metadaten unter `/.well-known/*` und die
+Endpunkte unter `/oauth/*` (Registrierung begrenzt; Token gibt es nur über eine Freigabe mit
+Sitzung). Wer vor Traefik eine IP-Allowlist oder Forward-Auth schaltet, muss `/mcp`,
+`/.well-known/*` und `/oauth/*` ausnehmen, sonst erreicht claude.ai den Connector nicht.
