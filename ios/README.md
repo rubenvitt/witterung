@@ -20,6 +20,35 @@ Die App-IDs `dev.rubeen.witterung` und `dev.rubeen.witterung.widgets`, die App G
 `group.dev.rubeen.witterung` und die Schlüsselbundgruppe `…dev.rubeen.witterung.shared`
 legt Xcode beim ersten Bauen an (`-allowProvisioningUpdates` auf der Kommandozeile).
 
+### TestFlight
+
+`.github/workflows/ios.yml`: Jeder Push auf `main`, der `ios/` ändert (oder ein Start von
+Hand unter Actions → iOS → „Run workflow“), baut die App signiert und lädt sie zu TestFlight
+hoch. Nach Apples Verarbeitung (meist 10–30 min) bekommt die interne Gruppe „Ich“ den Build
+automatisch, installiert wird über die TestFlight-App. Pull Requests bauen nur unsigniert
+(Release, Gerät) und lassen die Logiktests im Simulator laufen.
+
+Signiert wird automatisch über den App-Store-Connect-API-Schlüssel (Rolle **Admin**: Xcode
+legt Distributionszertifikat und Profile selbst an). Build-Nummer ist
+`<Laufnummer>.<Versuch>` des Workflows, die Version `MARKETING_VERSION` aus `project.yml`.
+`ITSAppUsesNonExemptEncryption = false` erspart die Frage nach der Exportkonformität.
+`PrivacyInfo.xcprivacy` in App und Widget erklärt die App-Group-Defaults (Grund `1C8F.1`).
+
+Einmalig eingerichtet (11.11.2026): App-IDs `dev.rubeen.witterung` und
+`dev.rubeen.witterung.widgets` mit der App Group `group.dev.rubeen.witterung` (automatische
+Signierung mit API-Schlüssel kann keine App Groups zuweisen), App-Eintrag „Witterung“ in
+App Store Connect (SKU `witterung`), interne Testgruppe „Ich“ mit automatischer Verteilung.
+Dazu im Repo unter Settings → Secrets and variables → Actions:
+
+| Secret | Inhalt |
+|---|---|
+| `APPLE_API_ISSUER` | Issuer-ID aus App Store Connect → Benutzer und Zugriff → Integrationen |
+| `APPLE_API_KEY` | Schlüssel-ID eines Admin-Schlüssels (z. B. „Witterung CI“) |
+| `APPLE_API_KEY_P8` | Inhalt der `.p8`-Datei dieses Schlüssels, komplett mit BEGIN/END-Zeilen |
+
+Lehnt Apple den Upload wegen einer schon vorhandenen Build-Nummer ab, den Workflow neu
+starten (der Versuch zählt mit). Für eine neue Version `MARKETING_VERSION` erhöhen.
+
 ### Tests
 
 19 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
@@ -91,6 +120,7 @@ ios/
 │   ├── RadarView.swift, WMSTile.swift    Radarkarte mit WMS-Kacheln
 │   └── PlacesView.swift, SettingsView.swift, AttributionView.swift
 ├── Widgets/           Widget-Extension (App Intent, Timeline-Provider)
+│                      (App/ und Widgets/ je mit PrivacyInfo.xcprivacy)
 ├── WitterungTests/    Logiktests und Fixture
 └── scripts/           Mock-Server, Testlauf ohne Instruments-Dienst
 ```
