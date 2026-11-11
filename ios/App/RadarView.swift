@@ -49,11 +49,11 @@ struct RadarView: View {
     }
 
     @ViewBuilder private var controls: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Spacing.m) {
             if let radar, !radar.frames.isEmpty {
                 let frame = radar.frames[min(index, radar.frames.count - 1)]
                 let isForecast = index > radar.lastMeasured
-                HStack {
+                HStack(spacing: Spacing.s) {
                     Button {
                         playing.toggle()
                     } label: {
@@ -62,7 +62,7 @@ struct RadarView: View {
                             .frame(width: 44, height: 44)
                     }
                     .accessibilityLabel(playing ? "Anhalten" : "Abspielen")
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: Spacing.xxs) {
                         Text(Fmt.time(frame)).font(.title3.weight(.semibold)).monospacedDigit()
                         Text(isForecast ? "Vorhersage" : "Messung")
                             .font(.caption.weight(.semibold))
@@ -79,9 +79,9 @@ struct RadarView: View {
             }
             Text("Radar: Deutscher Wetterdienst").font(.caption2).foregroundStyle(.secondary)
         }
-        .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .padding(.horizontal, 12)
+        .padding(Layout.cardPadding)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Layout.cardRadius + 2, style: .continuous))
+        .padding(.horizontal, Layout.screenMargin)
         .padding(.bottom, 30) // Platz für den Rechtshinweis von Apple Karten
     }
 
@@ -114,7 +114,7 @@ private struct FrameSlider: View {
     @Binding var index: Int
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: Spacing.xs) {
             Slider(value: Binding(get: { Double(index) }, set: { index = Int($0.rounded()) }),
                    in: 0...Double(max(1, frames.count - 1)), step: 1)
                 .sensoryFeedback(.selection, trigger: index == nowIndex)
@@ -151,7 +151,7 @@ private struct RadarLegend: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: 0) {
                 ForEach(Self.steps, id: \.0) { Rectangle().fill($0.1) }
             }
