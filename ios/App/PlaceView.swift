@@ -18,7 +18,7 @@ struct PlaceView: View {
         let forecast = model.forecasts[ref]
         ScrollViewReader { proxy in
         ScrollView {
-            VStack(spacing: 12) {
+            VStack(spacing: Layout.sectionSpacing) {
                 if let forecast {
                     HeaderView(title: model.title(ref), isCurrent: ref == .current, forecast: forecast)
                     FreshnessBadge(forecast: forecast, failure: model.failures[ref], loading: model.loading.contains(ref))
@@ -33,9 +33,9 @@ struct PlaceView: View {
                     placeholder
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, Layout.screenMargin)
             .padding(.top, 60)
-            .padding(.bottom, 24)
+            .padding(.bottom, Spacing.xl)
         }
         .scrollIndicators(.hidden)
         #if DEBUG
@@ -61,7 +61,7 @@ struct PlaceView: View {
     }
 
     @ViewBuilder private var placeholder: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: Spacing.l) {
             Text(model.title(ref)).font(.largeTitle)
             if let failure = model.failures[ref] {
                 ContentUnavailableView("Keine Daten", systemImage: "wifi.slash", description: Text(failure))
@@ -94,8 +94,8 @@ private struct HeaderView: View {
         let isDay = current?.isDay ?? true
         let today = forecast.day(at: .now)?.consensus
 
-        VStack(spacing: 2) {
-            HStack(spacing: 6) {
+        VStack(spacing: Spacing.xxs) {
+            HStack(spacing: Spacing.s) {
                 if isCurrent { Image(systemName: "location.fill").font(.footnote) }
                 Text(title)
             }
@@ -120,7 +120,7 @@ private struct HeaderView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.bottom, 8)
+        .padding(.bottom, Spacing.s)
         .accessibilityElement(children: .combine)
     }
 }
@@ -135,14 +135,14 @@ private struct FreshnessBadge: View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let age = context.date.timeIntervalSince(forecast.generatedAt)
             if failure != nil || age > 30 * 60 {
-                HStack(spacing: 6) {
+                HStack(spacing: Spacing.s) {
                     Image(systemName: failure != nil ? "wifi.slash" : "clock.arrow.circlepath")
                     Text((failure != nil ? "Offline · " : "") + "Stand: \(Fmt.age(forecast.generatedAt, now: context.date))")
                     if loading { ProgressView().controlSize(.mini) }
                 }
                 .font(.footnote.weight(.medium))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, Spacing.m)
+                .padding(.vertical, Spacing.s - Spacing.xxs)
                 .background((age > 3 * 3600 ? Color.orange : Color.white).opacity(0.22), in: Capsule())
                 .accessibilityElement(children: .combine)
             }
@@ -158,7 +158,7 @@ struct Card<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Layout.cardSpacing) {
             Label(title, systemImage: icon)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.7))
@@ -166,9 +166,9 @@ struct Card<Content: View>: View {
                 .accessibilityAddTraits(.isHeader)
             content
         }
-        .padding(14)
+        .padding(Layout.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: Layout.cardRadius, style: .continuous))
     }
 }
 

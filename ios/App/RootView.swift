@@ -26,6 +26,7 @@ struct RootView: View {
                         }
                         .tabViewStyle(.page(indexDisplayMode: .never))
                         .ignoresSafeArea(edges: .top)
+                        StatusBarScrim(color: topColor)
                     }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
@@ -60,6 +61,12 @@ struct RootView: View {
         let condition = f?.currentHour?.condition ?? .cloudy
         return Theme.gradient(condition, isDay: f?.currentHour?.isDay ?? true)
             .animation(.easeInOut(duration: 0.6), value: model.selection)
+    }
+
+    /// Oberste Farbe des Hintergrunds, für die Blende unter der Statusleiste.
+    private var topColor: Color {
+        let f = model.selection.flatMap { model.forecasts[$0] }
+        return Theme.colors(f?.currentHour?.condition ?? .cloudy, isDay: f?.currentHour?.isDay ?? true)[0]
     }
 
     private var emptyState: some View {
@@ -99,8 +106,8 @@ struct RootView: View {
         }
         .font(.title3)
         .foregroundStyle(.white)
-        .padding(.horizontal, 12)
-        .padding(.top, 4)
+        .padding(.horizontal, Spacing.m)
+        .padding(.top, Spacing.xs)
         .background(.ultraThinMaterial.opacity(0.8))
     }
 }
@@ -136,12 +143,34 @@ enum DebugArgs {
 }
 #endif
 
+/// Blendet Karten unter Statusleiste und Dynamic Island aus, statt sie beim
+/// Scrollen ohne Abstand daran stoßen zu lassen. Deckt genau den sicheren
+/// Bereich oben ab, der Ortskopf darunter bleibt unberührt.
+private struct StatusBarScrim: View {
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            let height = geo.safeAreaInsets.top
+            LinearGradient(stops: [.init(color: color, location: 0),
+                                   .init(color: color, location: 0.55),
+                                   .init(color: color.opacity(0), location: 1)],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(width: geo.size.width, height: height)
+                .animation(.easeInOut(duration: 0.6), value: color)
+        }
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct PageDots: View {
     let pages: [PlaceRef]
     let selection: PlaceRef?
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Spacing.s) {
             ForEach(pages, id: \.self) { ref in
                 Group {
                     if ref == .current {
@@ -176,7 +205,7 @@ struct SignInView: View {
     var body: some View {
         ZStack {
             Theme.gradient(.partlyCloudy, isDay: true).ignoresSafeArea()
-            VStack(spacing: 20) {
+            VStack(spacing: Spacing.l) {
                 Spacer()
                 Image(systemName: "cloud.sun.fill")
                     .symbolRenderingMode(.multicolor)
@@ -216,7 +245,7 @@ struct SignInView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .padding(32)
+            .padding(Spacing.xxl)
         }
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)

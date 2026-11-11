@@ -10,11 +10,11 @@ struct AlertCard: View {
     var body: some View {
         let color = Theme.alertColor(alert.severity)
         Button { showDetail = true } label: {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: Spacing.m) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.title2)
                     .foregroundStyle(color)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text(alert.eventTitle).font(.headline)
                     Text(alert.timeRange).font(.subheadline).foregroundStyle(.white.opacity(0.85))
                     Text(Theme.alertLevel(alert.severity) + " · DWD").font(.caption).foregroundStyle(.white.opacity(0.7))
@@ -22,10 +22,10 @@ struct AlertCard: View {
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.white.opacity(0.6))
             }
-            .padding(14)
+            .padding(Layout.cardPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(color.opacity(0.22), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(color.opacity(0.8), lineWidth: 1.5))
+            .background(color.opacity(0.22), in: RoundedRectangle(cornerRadius: Layout.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Layout.cardRadius, style: .continuous).strokeBorder(color.opacity(0.8), lineWidth: 1.5))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(Theme.alertLevel(alert.severity)): \(alert.eventTitle), \(alert.timeRange)")
@@ -52,7 +52,7 @@ private struct AlertDetail: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: Spacing.l) {
                     Label(Theme.alertLevel(alert.severity), systemImage: "exclamationmark.triangle.fill")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Theme.alertColor(alert.severity))
@@ -61,13 +61,13 @@ private struct AlertDetail: View {
                     Text(alert.description)
                     if let instruction = alert.instruction {
                         Text(instruction)
-                            .padding(12)
+                            .padding(Spacing.m)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Theme.alertColor(alert.severity).opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
                     }
                     Text("Quelle: Deutscher Wetterdienst").font(.footnote).foregroundStyle(.secondary)
                 }
-                .padding()
+                .padding(Layout.screenMargin)
                 .textSelection(.enabled)
             }
             .navigationTitle(alert.eventTitle)
@@ -98,14 +98,14 @@ struct NowcastCard: View {
                         Text("Radar: Deutscher Wetterdienst").font(.caption2).foregroundStyle(.white.opacity(0.6))
                     }
                 } else if let sentence = summary.sentence {
-                    HStack(spacing: 10) {
+                    HStack(spacing: Spacing.s) {
                         Image(systemName: "umbrella")
                         Text(sentence)
                     }
                     .font(.subheadline.weight(.medium))
-                    .padding(14)
+                    .padding(Layout.cardPadding)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: Layout.cardRadius, style: .continuous))
                     .accessibilityElement(children: .combine)
                 }
             }
@@ -162,17 +162,23 @@ struct HourlyCard: View {
         let showsProbability = rows.contains { ($0.consensus.precipProbPct ?? 0) >= 20 }
         Card(title: "48 Stunden", icon: "clock") {
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 14) {
+                HStack(alignment: .top, spacing: Spacing.m) {
                     ForEach(Array(rows.enumerated()), id: \.element.at) { index, row in
                         HourColumn(row: row, isFirst: index == 0, showsProbability: showsProbability)
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, Spacing.xs)
             }
             .scrollIndicators(.hidden)
+            // Bis an den Kartenrand scrollen statt am Innenabstand abgeschnitten zu werden.
+            .contentMargins(.horizontal, Layout.cardPadding, for: .scrollContent)
+            .padding(.horizontal, -Layout.cardPadding)
             Divider().overlay(.white.opacity(0.3))
+            // Platz für die Wochentage über den Mitternachtslinien, die sonst
+            // an der Trennlinie und den Temperaturen darüber kleben.
             HourlyChart(rows: rows)
                 .frame(height: 170)
+                .padding(.top, Spacing.l)
             Text("Linie: Median aller Quellen · Fläche: Spannbreite").font(.caption2).foregroundStyle(.white.opacity(0.6))
         }
     }
@@ -186,7 +192,7 @@ private struct HourColumn: View {
     var body: some View {
         let c = row.consensus
         let isMidnight = Fmt.calendar.component(.hour, from: row.at) == 0
-        VStack(spacing: 6) {
+        VStack(spacing: Spacing.s - Spacing.xxs) {
             Text(isFirst ? "Jetzt" : isMidnight ? Fmt.weekday(Fmt.dayString(row.at)) : Fmt.hour(row.at))
                 .font(.footnote.weight(isFirst || isMidnight ? .bold : .medium))
                 .lineLimit(1)
@@ -305,10 +311,11 @@ private struct DayRowView: View {
     let current: Double?
     @ScaledMetric(relativeTo: .body) private var dayWidth = 52
     @ScaledMetric(relativeTo: .caption) private var mmWidth = 52
+    @ScaledMetric(relativeTo: .body) private var tempWidth = 36
 
     var body: some View {
         let c = day.consensus
-        HStack(spacing: 10) {
+        HStack(spacing: Spacing.s) {
             Text(Fmt.weekday(day.date))
                 .font(.body.weight(.medium))
                 .lineLimit(1)
@@ -326,19 +333,19 @@ private struct DayRowView: View {
             .frame(width: 40)
             Text(Fmt.temp(c.tempMinC))
                 .foregroundStyle(.white.opacity(0.7))
-                .frame(width: 36, alignment: .trailing)
+                .frame(width: tempWidth, alignment: .trailing)
             RangeBar(low: low, high: high, min: c.tempMinC, max: c.tempMaxC,
                      spreadMin: day.spread.tempMinC?.min, spreadMax: day.spread.tempMaxC?.max, current: current)
                 .frame(height: 6)
             Text(Fmt.temp(c.tempMaxC))
-                .frame(width: 36, alignment: .leading)
+                .frame(width: tempWidth, alignment: .leading)
             Text(c.precipMm >= 0.1 ? Fmt.mm(c.precipMm) : "")
                 .font(.caption)
                 .foregroundStyle(.cyan)
                 .lineLimit(1)
                 .frame(width: mmWidth, alignment: .trailing)
         }
-        .padding(.vertical, 9)
+        .padding(.vertical, Spacing.s)
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(Fmt.longDay(day.date)): \(c.condition.label()), \(Fmt.temp(c.tempMinC)) bis \(Fmt.temp(c.tempMaxC))"
@@ -409,33 +416,49 @@ struct CurrentDetailsCard: View {
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.75))
             }
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                if let wind = o?.windKmh ?? f?.windKmh {
-                    let dir = o?.windDirDeg ?? f?.windDirDeg
-                    DetailTile(title: "Wind", icon: "wind", value: Fmt.kmh(wind),
-                               detail: [dir.map { "aus \(Fmt.compassPoint($0))" }, (o?.gustKmh ?? f?.gustKmh).map { "Böen \(Fmt.kmh($0))" }]
-                                   .compactMap { $0 }.joined(separator: " · "),
-                               arrow: dir)
-                }
-                if let feels = f?.feelsLikeC {
-                    DetailTile(title: "Gefühlt", icon: "thermometer.variable", value: Fmt.temp(feels), detail: "laut Vorhersage")
-                }
-                if let humidity = o?.humidityPct ?? f?.humidityPct {
-                    DetailTile(title: "Feuchte", icon: "humidity", value: Fmt.percent(humidity), detail: "relativ")
-                }
-                if let pressure = o?.pressureHpa ?? f?.pressureHpa {
-                    DetailTile(title: "Luftdruck", icon: "gauge.with.dots.needle.33percent", value: Fmt.hpa(pressure), detail: "auf Meereshöhe")
-                }
-                if let visibility = o?.visibilityM {
-                    DetailTile(title: "Sicht", icon: "eye", value: Fmt.distance(meters: visibility), detail: "")
-                }
-                if let precip = o?.precipMm1h {
-                    DetailTile(title: "Niederschlag", icon: "drop.fill", value: Fmt.mm(precip), detail: "letzte Stunde")
-                } else if let cloud = o?.cloudPct ?? f?.cloudPct {
-                    DetailTile(title: "Bewölkung", icon: "cloud", value: Fmt.percent(cloud), detail: "")
+            // Grid statt LazyVGrid: Kacheln einer Zeile werden gleich hoch und oben bündig.
+            let tiles = detailTiles(o, f)
+            Grid(horizontalSpacing: Layout.tileSpacing, verticalSpacing: Layout.tileSpacing) {
+                ForEach(Array(stride(from: 0, to: tiles.count, by: 2)), id: \.self) { i in
+                    GridRow {
+                        tiles[i]
+                        if i + 1 < tiles.count {
+                            tiles[i + 1]
+                        } else {
+                            Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private func detailTiles(_ o: ObservedWeather?, _ f: HourPoint?) -> [DetailTile] {
+        var tiles: [DetailTile] = []
+        if let wind = o?.windKmh ?? f?.windKmh {
+            let dir = o?.windDirDeg ?? f?.windDirDeg
+            let detail = [dir.map { "aus \(Fmt.compassPoint($0))" }, (o?.gustKmh ?? f?.gustKmh).map { "Böen \(Fmt.kmh($0))" }]
+                .compactMap { $0 }.joined(separator: " · ")
+            tiles.append(DetailTile(title: "Wind", icon: "wind", value: Fmt.kmh(wind), detail: detail, arrow: dir))
+        }
+        if let feels = f?.feelsLikeC {
+            tiles.append(DetailTile(title: "Gefühlt", icon: "thermometer.variable", value: Fmt.temp(feels), detail: "laut Vorhersage"))
+        }
+        if let humidity = o?.humidityPct ?? f?.humidityPct {
+            tiles.append(DetailTile(title: "Feuchte", icon: "humidity", value: Fmt.percent(humidity), detail: "relativ"))
+        }
+        if let pressure = o?.pressureHpa ?? f?.pressureHpa {
+            tiles.append(DetailTile(title: "Luftdruck", icon: "gauge.with.dots.needle.33percent", value: Fmt.hpa(pressure), detail: "auf Meereshöhe"))
+        }
+        if let visibility = o?.visibilityM {
+            tiles.append(DetailTile(title: "Sicht", icon: "eye", value: Fmt.distance(meters: visibility), detail: ""))
+        }
+        if let precip = o?.precipMm1h {
+            tiles.append(DetailTile(title: "Niederschlag", icon: "drop.fill", value: Fmt.mm(precip), detail: "letzte Stunde"))
+        } else if let cloud = o?.cloudPct ?? f?.cloudPct {
+            tiles.append(DetailTile(title: "Bewölkung", icon: "cloud", value: Fmt.percent(cloud), detail: ""))
+        }
+        return tiles
     }
 }
 
@@ -447,7 +470,7 @@ private struct DetailTile: View {
     var arrow: Double?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             Label(title, systemImage: icon).font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
             HStack(alignment: .firstTextBaseline) {
                 Text(value).font(.title2.weight(.medium)).minimumScaleFactor(0.7).lineLimit(1)
@@ -462,9 +485,9 @@ private struct DetailTile: View {
                 Text(detail).font(.caption).foregroundStyle(.white.opacity(0.75)).lineLimit(2)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 78, alignment: .topLeading)
-        .padding(12)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .frame(maxWidth: .infinity, minHeight: 78, maxHeight: .infinity, alignment: .topLeading)
+        .padding(Layout.tilePadding)
+        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: Layout.tileRadius, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
@@ -480,8 +503,8 @@ struct SourcesCard: View {
         let problems = forecast.sources.filter { !$0.ok || $0.stale }
         NavigationLink(value: ComparisonRoute(ref: ref)) {
             Card(title: "Quellen", icon: "square.stack.3d.up") {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: Spacing.m) {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
                         Text("\(ok.count) von \(forecast.sources.count) Quellen aktuell")
                             .font(.body.weight(.medium))
                         ForEach(problems) { source in
@@ -508,7 +531,7 @@ struct AttributionFooter: View {
     let ref: PlaceRef
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Spacing.s) {
             if forecast.hasWeatherKit {
                 Link(destination: URL(string: "https://weatherkit.apple.com/legal-attribution.html")!) {
                     Text("\u{F8FF}Weather").font(.footnote.weight(.semibold))
@@ -525,6 +548,7 @@ struct AttributionFooter: View {
                 .font(.caption2)
         }
         .foregroundStyle(.white.opacity(0.75))
-        .padding(.top, 4)
+        .padding(.horizontal, Spacing.s)
+        .padding(.top, Spacing.s)
     }
 }
