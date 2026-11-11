@@ -1,0 +1,150 @@
+name: iOS
+
+# Pull requests that touch the iOS app build it unsigned (Release, device) and
+# run the logic tests in the simulator. Every push to main that touches ios/
+# (or a manual start) builds it signed and uploads it to TestFlight; the
+# internal group "Ich" gets each build automatically once Apple has processed
+# it (usually 10–30 min).
+#
+# Signing is automatic through the App Store Connect API key (Admin role:
+# Xcode creates the distribution certificate and profiles itself). Set up once
+# by hand, see ios/README.md, "TestFlight": the app record for
+# dev.rubeen.witterung in App Store Connect, the App IDs dev.rubeen.witterung
+# and dev.rubeen.witterung.widgets with the App Group group.dev.rubeen.witterung
+# (automatic signing with an API key cannot add App Groups), and the secrets
+# APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_P8. Pattern taken from zunder.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: iOS (unsigniert, Tests)
+    if: github.event_name == 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Xcode-Projekt erzeugen
+        run: |
+          xcodebuild -version
+          command -v xcodegen > /dev/null || brew install xcodegen
+          xcodegen generate
+      - name: Bauen (Release, Gerät, unsigniert)
+        run: |
+          xcodebuild build -project Witterung.xcodeproj -scheme Witterung -configuration Release \
+            -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO -quiet
+      - name: Logiktests (Simulator)
+        run: |
+          sim=$(xcrun simctl list devices available -j \
+            | jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[]
+                      | select(.name | startswith("iPhone"))][0].udid')
+          test -n "$sim" && test "$sim" != null
+          xcodebuild test -project Witterung.xcodeproj -scheme Witterung \
+            -destination "platform=iOS Simulator,id=$sim" CODE_SIGNING_ALLOWED=NO -quiet
+
+  testflight:
+    name: iOS (TestFlight)
+    if: github.event_name != 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ios
+    env:
+      # Strictly increasing per marketing version; the attempt keeps a re-run
+      # from colliding with a build Apple already has.
+      BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: API-Schlüssel ablegen
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          for name in APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_P8; do
+            [ -n "${!name}" ] || { echo "::error::Secret $name fehlt (ios/README.md, Abschnitt „TestFlight“)"; exit 1; }
+          done
+          # altool only looks for the key here, under this name.
+          dir="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$dir"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$dir/AuthKey_$APPLE_API_KEY.p8"
+          echo "APPLE_API_KEY_PATH=$dir/AuthKey_$APPLE_API_KEY.p8" >> "$GITHUB_ENV"
+
+      - name: Xcode-Projekt erzeugen
+        run: |
+          xcodebuild -version
+          command -v xcodegen > /dev/null || brew install xcodegen
+          xcodegen generate
+
+      - name: Archivieren
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/archive.log"
+          if ! xcodebuild archive -quiet -project Witterung.xcodeproj -scheme Witterung -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Witterung.xcarchive" \
+            -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" \
+            -authenticationKeyID "$APPLE_API_KEY" -authenticationKeyIssuerID "$APPLE_API_ISSUER" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" 2>&1 | tee "$log"; then
+            if grep -Eq "Automatic signing cannot (update|register) bundle identifier" "$log"; then
+              echo "::error::App-IDs oder App Group fehlen im Apple-Developer-Portal. Einmalig von Hand einrichten: ios/README.md, Abschnitt „TestFlight“."
+            fi
+            exit 1
+          fi
+
+      - name: Exportieren (App Store Connect)
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>H95J852PKP</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Witterung.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates -authenticationKeyPath "$APPLE_API_KEY_PATH" \
+            -authenticationKeyID "$APPLE_API_KEY" -authenticationKeyIssuerID "$APPLE_API_ISSUER"
+          ls -l "$RUNNER_TEMP/export"
+
+      - name: Zu TestFlight hochladen
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          xcrun altool --upload-app --type ios --file "$RUNNER_TEMP/export/Witterung.ipa" \
+            --apiKey "$APPLE_API_KEY" --apiIssuer "$APPLE_API_ISSUER"
+          echo "Build $BUILD_NUMBER hochgeladen; nach Apples Verarbeitung in TestFlight (Gruppe „Ich“)." >> "$GITHUB_STEP_SUMMARY"

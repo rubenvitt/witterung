@@ -5,7 +5,8 @@ Open-Meteo (mehrere Modelle), Bright Sky/DWD und Pirate Weather und beliefert ei
 SwiftUI-App mit Widgets.
 
 Stand: **M0–M7 umgesetzt**: Server (Quellen, Konsens, Jetzt/Nowcast/Warnungen, Push über ntfy,
-Geräte-Anmeldung), iOS-App mit Widgets und Radarkarte ([ios/README.md](ios/README.md)) und
+Geräte-Anmeldung), iOS-App mit Widgets und Radarkarte ([ios/README.md](ios/README.md), per
+TestFlight verteilt) und
 Web-App unter `/` ([web/README.md](web/README.md)). WeatherKit und Pirate Weather warten auf ihre
 Zugänge.
 Dazu ein MCP-Server unter `/mcp`, damit Claude Vorhersagen, Warnungen und Orte abfragen kann
