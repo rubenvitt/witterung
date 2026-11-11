@@ -157,9 +157,11 @@ private struct StatusBarScrim: View {
                                    .init(color: color.opacity(0), location: 1)],
                            startPoint: .top, endPoint: .bottom)
                 .frame(width: geo.size.width, height: height)
+                // Der Reader liegt im sicheren Bereich (sonst wäre der Inset 0);
+                // die Blende wird darüber in den Statusleistenbereich geschoben.
+                .offset(y: -height)
                 .animation(.easeInOut(duration: 0.6), value: color)
         }
-        .ignoresSafeArea(edges: .top)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
