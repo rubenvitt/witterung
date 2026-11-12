@@ -53,8 +53,10 @@ final class AppModel {
     // MARK: Laden
 
     func start() async {
+        PhoneSync.shared.push()
         guard signedIn else { return }
         location.start { [weak self] _ in
+            PhoneSync.shared.push()
             Task { await self?.refresh(.current) }
         }
         await refreshAll()
@@ -75,6 +77,7 @@ final class AppModel {
             guard server == serverURL else { return } // Server inzwischen gewechselt
             places = fresh
             SharedStore.places = fresh
+            PhoneSync.shared.push()
             if selection == nil || !pages.contains(selection!) { selection = pages.first }
         } catch {
             handle(error)
@@ -135,6 +138,7 @@ final class AppModel {
     func signOut() {
         TokenStore.delete()
         signedIn = !API.needsAuth(serverURL)
+        PhoneSync.shared.push()
     }
 
     func setServer(_ text: String) {
@@ -153,6 +157,7 @@ final class AppModel {
         signedIn = !API.needsAuth(url)
         selection = pages.first
         WidgetCenter.shared.reloadAllTimelines()
+        PhoneSync.shared.push()
         Task { await start() }
     }
 
@@ -226,6 +231,7 @@ final class AppModel {
 
     private func placesChanged() {
         SharedStore.places = places
+        PhoneSync.shared.push()
         if selection == nil || !pages.contains(selection!) { selection = pages.first }
         WidgetCenter.shared.reloadAllTimelines()
     }
