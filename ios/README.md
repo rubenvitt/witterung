@@ -38,6 +38,10 @@ Einmalig eingerichtet (11.11.2026): App-IDs `dev.rubeen.witterung` und
 `dev.rubeen.witterung.widgets` mit der App Group `group.dev.rubeen.witterung` (automatische
 Signierung mit API-Schlüssel kann keine App Groups zuweisen), App-Eintrag „Witterung“ in
 App Store Connect (SKU `witterung`), interne Testgruppe „Ich“ mit automatischer Verteilung.
+Für die Watch-App kommen zwei App-IDs dazu, ebenfalls mit der App Group
+`group.dev.rubeen.witterung`: `dev.rubeen.witterung.watchkitapp` und
+`dev.rubeen.witterung.watchkitapp.widgets` (Apple Developer → Identifiers → „+“ → App IDs,
+Capability „App Groups“ → Configure → die Gruppe wählen).
 Dazu im Repo unter Settings → Secrets and variables → Actions:
 
 | Secret | Inhalt |
@@ -119,7 +123,8 @@ ios/
 │   ├── ComparisonView.swift   Quellenvergleich und Quellenstatus
 │   ├── RadarView.swift, WMSTile.swift    Radarkarte mit WMS-Kacheln
 │   └── PlacesView.swift, SettingsView.swift, AttributionView.swift
-├── Widgets/           Widget-Extension (App Intent, Timeline-Provider)
+├── Widgets/           Widget-Extension (App Intent, Timeline-Provider), auch für die Watch
+├── Watch/             Watch-App (Modell, Ansichten, WatchConnectivity)
 │                      (App/ und Widgets/ je mit PrivacyInfo.xcprivacy)
 ├── WitterungTests/    Logiktests und Fixture
 └── scripts/           Mock-Server, Testlauf ohne Instruments-Dienst
@@ -139,6 +144,19 @@ als Karte mit Diagramm, sonst eine Zeile); 48 Stunden als Streifen und Diagramm 
 Spannbreite als Fläche, Regen als Balken); 10 Tage mit Temperaturbalken, dahinter blass die
 Spannbreite der Quellen (Tipp → Quellenvergleich des Tages); Messwerte; Quellenstatus;
 Attribution.
+
+**Apple Watch.** Die Watch-App (`Watch/`) kommt im Paket der iPhone-App mit und wird mit
+ihr installiert. Anmelden kann sie sich nicht selbst (Pocket ID will einen Browser mit
+Passkey), deshalb schickt das iPhone Server, Geräte-Token, Orte und den letzten Standort per
+WatchConnectivity (`applicationContext`, `Shared/WatchLink.swift`, `App/PhoneSync.swift`),
+nach jeder Änderung an Anmeldung, Server, Orten oder Standort. Danach lädt die Watch die
+Vorhersagen selbst vom Server, über WLAN oder Mobilfunk auch ohne iPhone in der Nähe, mit
+eigenem Standort und eigenem Cache. Ansicht: Liste der Orte (Temperatur, Symbol,
+Regenhinweis), Tipp → Ortsseite mit Temperatur, Warnungen (Tipp → voller Text), Nowcast,
+12 Stunden, 10 Tage, Stand und Quellen. Komplikationen und Smart Stack nutzen
+`Widgets/WitterungWidgets.swift` mit den Watch-Größen rund, rechteckig, einzeilig und Ecke;
+weil die Watch keinen Konfigurationsdialog hat, bietet `recommendations()` jeden Ort als
+eigene Komplikation an.
 
 **Widgets.** Klein, mittel, groß, Sperrbildschirm rund, rechteckig und einzeilig. Ort per
 App Intent: gespeicherter Ort oder „Mein Standort“ (eigener Standort des Widgets, sonst der
