@@ -1,11 +1,12 @@
 name: Witterung
 
 # Xcode-Projekt entsteht mit `xcodegen generate` (im Ordner ios/) und wird nicht
-# eingecheckt. Keine Pakete: Shared/ wird in App und Widget mitkompiliert.
+# eingecheckt. Keine Pakete: Shared/ wird in App, Widgets und Watch-App mitkompiliert.
 options:
   bundleIdPrefix: dev.rubeen
   deploymentTarget:
     iOS: "26.0"
+    watchOS: "26.0"
   createIntermediateGroups: true
   groupSortPosition: top
   developmentLanguage: de
@@ -30,6 +31,9 @@ targets:
       - path: Shared
     dependencies:
       - target: WitterungWidgets
+        embed: true
+      # Landet unter Witterung.app/Watch/ und wird mit der iPhone-App installiert.
+      - target: WitterungWatch
         embed: true
     settings:
       base:
@@ -89,6 +93,87 @@ targets:
         keychain-access-groups: [$(AppIdentifierPrefix)dev.rubeen.witterung.shared]
     info:
       path: DerivedInfo/WitterungWidgets-Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: de
+        NSWidgetWantsLocation: true
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+  # Watch-App: lädt selbst vom Server (WLAN/Mobilfunk, auch ohne iPhone in der
+  # Nähe), Server, Token und Orte kommen per WatchConnectivity vom iPhone
+  # (Shared/WatchLink.swift). Auf der Watch gelten dieselbe App Group und
+  # Schlüsselbundgruppe wie auf dem iPhone, nur eben im Speicher der Watch.
+  WitterungWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: Watch
+      - path: Shared
+      - path: App/LocationProvider.swift
+    dependencies:
+      - target: WitterungWatchWidgets
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.witterung.watchkitapp
+        PRODUCT_NAME: WitterungWatch
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Witterung
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Witterung zeigt das Wetter an deinem aktuellen Standort."
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    entitlements:
+      path: DerivedInfo/WitterungWatch.entitlements
+      properties:
+        com.apple.security.application-groups: [group.dev.rubeen.witterung]
+        keychain-access-groups: [$(AppIdentifierPrefix)dev.rubeen.witterung.shared]
+    info:
+      path: DerivedInfo/WitterungWatch-Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: de
+        CFBundleLocalizations: [de]
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: dev.rubeen.witterung
+        # Braucht das iPhone für Anmeldung und Orte, danach geht es ohne.
+        WKRunsIndependentlyOfCompanionApp: false
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        CFBundleURLTypes:
+          # Tipp auf eine Komplikation: witterung://place/<id|current>
+          - CFBundleURLName: dev.rubeen.witterung.place
+            CFBundleURLSchemes: [witterung]
+
+  # Komplikationen und Smart Stack: dieselbe Widget-Datei wie auf dem iPhone,
+  # mit Watch-Größen (Widgets/WitterungWidgets.swift, `families`).
+  WitterungWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: Widgets
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.witterung.watchkitapp.widgets
+        PRODUCT_NAME: WitterungWatchWidgets
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Witterung
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Witterung zeigt das Wetter an deinem aktuellen Standort."
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: YES
+    entitlements:
+      path: DerivedInfo/WitterungWatchWidgets.entitlements
+      properties:
+        com.apple.security.application-groups: [group.dev.rubeen.witterung]
+        keychain-access-groups: [$(AppIdentifierPrefix)dev.rubeen.witterung.shared]
+    info:
+      path: DerivedInfo/WitterungWatchWidgets-Info.plist
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
