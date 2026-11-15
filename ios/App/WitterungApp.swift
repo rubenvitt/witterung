@@ -11,6 +11,7 @@ struct WitterungApp: App {
         if let url = DebugArgs.value("-server").flatMap(URL.init(string:)) { SharedStore.serverURL = url }
         #endif
         _model = State(initialValue: AppModel())
+        PhoneSync.shared.activate()
     }
 
     var body: some Scene {

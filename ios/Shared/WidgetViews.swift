@@ -10,13 +10,17 @@ struct WeatherWidgetView: View {
     var body: some View {
         if let s = snapshot {
             switch family {
+            #if os(watchOS)
+            case .accessoryCorner: CornerView(s: s)
+            #else
             case .systemSmall: SmallView(s: s)
             case .systemMedium: MediumView(s: s)
             case .systemLarge, .systemExtraLarge: LargeView(s: s)
+            #endif
             case .accessoryCircular: CircularView(s: s)
             case .accessoryRectangular: RectangularView(s: s)
             case .accessoryInline: InlineView(s: s)
-            default: SmallView(s: s)
+            default: CircularView(s: s)
             }
         } else {
             VStack(spacing: Spacing.xs) {
@@ -29,7 +33,13 @@ struct WeatherWidgetView: View {
 }
 
 extension WidgetFamily {
-    var isAccessory: Bool { [.accessoryCircular, .accessoryRectangular, .accessoryInline].contains(self) }
+    var isAccessory: Bool {
+        #if os(watchOS)
+        true // Auf der Watch gibt es nur Komplikationen und den Smart Stack.
+        #else
+        [.accessoryCircular, .accessoryRectangular, .accessoryInline].contains(self)
+        #endif
+    }
 }
 
 private struct PlaceTitle: View {
@@ -52,6 +62,7 @@ private struct MinMax: View {
     }
 }
 
+#if !os(watchOS)
 private struct SmallView: View {
     let s: WeatherSnapshot
     var body: some View {
@@ -166,6 +177,7 @@ private struct LargeView: View {
         .foregroundStyle(.white)
     }
 }
+#endif
 
 private struct CircularView: View {
     let s: WeatherSnapshot
@@ -211,3 +223,30 @@ private struct InlineView: View {
         Label("\(Fmt.temp(s.temp)) · \(s.rainHint)", systemImage: s.condition.symbol(isDay: s.isDay))
     }
 }
+
+#if os(watchOS)
+/// Ecke des Zifferblatts: Symbol in der Ecke, Temperatur und Tagesspanne im Bogen.
+private struct CornerView: View {
+    let s: WeatherSnapshot
+    var body: some View {
+        Image(systemName: s.condition.symbol(isDay: s.isDay))
+            .font(.title3)
+            .widgetLabel {
+                if let min = s.min, let max = s.max, min < max {
+                    Gauge(value: Swift.min(Swift.max(s.temp, min), max), in: min...max) {
+                        Text(Fmt.temp(s.temp))
+                    } currentValueLabel: {
+                        Text(Fmt.temp(s.temp))
+                    } minimumValueLabel: {
+                        Text(Fmt.temp(min).dropLast())
+                    } maximumValueLabel: {
+                        Text(Fmt.temp(max).dropLast())
+                    }
+                    .tint(LinearGradient(colors: [.cyan, .yellow], startPoint: .leading, endPoint: .trailing))
+                } else {
+                    Text(Fmt.temp(s.temp))
+                }
+            }
+    }
+}
+#endif

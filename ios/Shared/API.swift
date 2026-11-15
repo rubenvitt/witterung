@@ -29,6 +29,13 @@ struct API: Sendable {
 
     var needsAuth: Bool { Self.needsAuth(baseURL) }
 
+    /// Kennung im Header `X-Witterung-Client` (der Server prüft nur, dass er da ist).
+    #if os(watchOS)
+    static let client = "watchos"
+    #else
+    static let client = "ios"
+    #endif
+
     // MARK: Endpunkte
 
     func places() async throws -> [Place] {
@@ -81,7 +88,7 @@ struct API: Sendable {
         if !query.isEmpty { url.append(queryItems: query) }
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.httpMethod = method
-        request.setValue("ios", forHTTPHeaderField: "X-Witterung-Client")
+        request.setValue(Self.client, forHTTPHeaderField: "X-Witterung-Client")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let body {
             request.httpBody = body

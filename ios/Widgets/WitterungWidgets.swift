@@ -23,8 +23,15 @@ struct WeatherWidget: Widget {
         }
         .configurationDisplayName("Wetter")
         .description("Temperatur, Wetterlage und Regenhinweis für einen Ort.")
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular, .accessoryInline])
+        .supportedFamilies(Self.families)
     }
+
+    #if os(watchOS)
+    /// Komplikationen und Smart Stack der Watch.
+    static let families: [WidgetFamily] = [.accessoryCircular, .accessoryRectangular, .accessoryInline, .accessoryCorner]
+    #else
+    static let families: [WidgetFamily] = [.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular, .accessoryInline]
+    #endif
 }
 
 // MARK: Konfiguration
@@ -79,6 +86,18 @@ struct Provider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> Entry {
         Entry(date: .now, snapshot: nil, family: context.family, placeID: "current")
     }
+
+    #if os(watchOS)
+    /// Auf der Watch gibt es keinen Konfigurationsdialog: Jeder Ort wird als eigene
+    /// Komplikation angeboten (Orte kommen vom iPhone).
+    func recommendations() -> [AppIntentRecommendation<SelectPlaceIntent>] {
+        PlaceQuery.all().map { place in
+            let intent = SelectPlaceIntent()
+            intent.place = place
+            return AppIntentRecommendation(intent: intent, description: Text(place.name))
+        }
+    }
+    #endif
 
     func snapshot(for configuration: SelectPlaceIntent, in context: Context) async -> Entry {
         let place = configuration.place ?? .current

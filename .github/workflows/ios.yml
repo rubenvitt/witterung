@@ -9,8 +9,9 @@ name: iOS
 # Signing is automatic through the App Store Connect API key (Admin role:
 # Xcode creates the distribution certificate and profiles itself). Set up once
 # by hand, see ios/README.md, "TestFlight": the app record for
-# dev.rubeen.witterung in App Store Connect, the App IDs dev.rubeen.witterung
-# and dev.rubeen.witterung.widgets with the App Group group.dev.rubeen.witterung
+# dev.rubeen.witterung in App Store Connect, the App IDs dev.rubeen.witterung,
+# dev.rubeen.witterung.widgets, dev.rubeen.witterung.watchkitapp and
+# dev.rubeen.witterung.watchkitapp.widgets with the App Group group.dev.rubeen.witterung
 # (automatic signing with an API key cannot add App Groups), and the secrets
 # APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_P8. Pattern taken from zunder.
 on:
