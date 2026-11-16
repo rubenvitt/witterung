@@ -4,7 +4,14 @@ import WidgetKit
 
 /// Nur für Screenshots (`-widgetGallery`): die Widget-Ansichten in Originalgröße
 /// (iPhone 17 Pro), weil sich Widgets per simctl nicht auf den Home-Bildschirm legen lassen.
+/// `-widgetGallery top|large` zeigt das Wetter-Widget, `focus|hourly|daily` die anderen Arten
+/// (mit `-widgetStyle focus` lässt sich die Art auch zu `large` angeben).
 struct WidgetGallery: View {
+    private var style: WidgetStyle {
+        WidgetStyle(rawValue: DebugArgs.value("-widgetGallery") ?? "")
+            ?? DebugArgs.value("-widgetStyle").flatMap(WidgetStyle.init(rawValue:)) ?? .weather
+    }
+
     var body: some View {
         let forecast = ForecastCache.load(.saved(SharedStore.places.first?.id ?? 1)) ?? ForecastCache.load(.current)
         let snapshot = forecast.flatMap { WeatherSnapshot.make($0, at: .now) }
@@ -32,7 +39,7 @@ struct WidgetGallery: View {
     }
 
     private func tile(_ s: WeatherSnapshot?, _ family: WidgetFamily, _ size: CGSize) -> some View {
-        WeatherWidgetView(snapshot: s, family: family)
+        StyledWidgetView(style: style, snapshot: s, family: family)
             .padding(16)
             .frame(width: size.width, height: size.height)
             .background(Theme.gradient(s?.condition ?? .cloudy, isDay: s?.isDay ?? true))
@@ -40,7 +47,7 @@ struct WidgetGallery: View {
     }
 
     private func lock(_ s: WeatherSnapshot?, _ family: WidgetFamily, _ size: CGSize) -> some View {
-        WeatherWidgetView(snapshot: s, family: family)
+        StyledWidgetView(style: style, snapshot: s, family: family)
             .foregroundStyle(.white)
             .frame(width: size.width, height: size.height)
             .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))

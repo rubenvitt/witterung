@@ -34,17 +34,6 @@ struct AlertCard: View {
     }
 }
 
-extension WeatherAlert {
-    /// „STURMBÖEN“ → „Sturmböen“
-    var eventTitle: String { event.lowercased(with: Fmt.locale).capitalized(with: Fmt.locale) }
-
-    var timeRange: String {
-        let start = onset <= .now ? "seit \(Fmt.dayTime(onset))" : "ab \(Fmt.dayTime(onset))"
-        guard let expires else { return start }
-        return "\(start) bis \(Fmt.dayTime(expires))"
-    }
-}
-
 private struct AlertDetail: View {
     let alert: WeatherAlert
     @Environment(\.dismiss) private var dismiss

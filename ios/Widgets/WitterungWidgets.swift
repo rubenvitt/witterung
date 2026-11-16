@@ -7,31 +7,71 @@ import WidgetKit
 struct WitterungWidgetBundle: WidgetBundle {
     var body: some Widget {
         WeatherWidget()
+        FocusWidget()
+        HourlyWidget()
+        DailyWidget()
     }
 }
 
 struct WeatherWidget: Widget {
     var body: some WidgetConfiguration {
-        AppIntentConfiguration(kind: "weather", intent: SelectPlaceIntent.self, provider: Provider()) { entry in
-            WeatherWidgetView(snapshot: entry.snapshot, family: entry.family)
-                .environment(\.locale, Fmt.locale)
-                .environment(\.timeZone, Fmt.timeZone)
-                .containerBackground(for: .widget) {
-                    Theme.gradient(entry.snapshot?.condition ?? .cloudy, isDay: entry.snapshot?.isDay ?? true)
-                }
-                .widgetURL(URL(string: "witterung://place/\(entry.placeID)"))
+        AppIntentConfiguration(kind: WidgetStyle.weather.kind, intent: SelectPlaceIntent.self, provider: Provider(style: .weather)) {
+            WidgetEntryView(style: .weather, entry: $0)
         }
-        .configurationDisplayName("Wetter")
-        .description("Temperatur, Wetterlage und Regenhinweis für einen Ort.")
-        .supportedFamilies(Self.families)
+        .configurationDisplayName(WidgetStyle.weather.displayName)
+        .description(WidgetStyle.weather.summary)
+        .supportedFamilies(WidgetStyle.weather.families)
     }
+}
 
-    #if os(watchOS)
-    /// Komplikationen und Smart Stack der Watch.
-    static let families: [WidgetFamily] = [.accessoryCircular, .accessoryRectangular, .accessoryInline, .accessoryCorner]
-    #else
-    static let families: [WidgetFamily] = [.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular, .accessoryInline]
-    #endif
+/// „Im Blick“: entscheidet selbst, was gerade zählt (`Insight.rank`), und sagt, warum.
+struct FocusWidget: Widget {
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: WidgetStyle.focus.kind, intent: SelectPlaceIntent.self, provider: Provider(style: .focus)) {
+            WidgetEntryView(style: .focus, entry: $0)
+        }
+        .configurationDisplayName(WidgetStyle.focus.displayName)
+        .description(WidgetStyle.focus.summary)
+        .supportedFamilies(WidgetStyle.focus.families)
+    }
+}
+
+struct HourlyWidget: Widget {
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: WidgetStyle.hourly.kind, intent: SelectPlaceIntent.self, provider: Provider(style: .hourly)) {
+            WidgetEntryView(style: .hourly, entry: $0)
+        }
+        .configurationDisplayName(WidgetStyle.hourly.displayName)
+        .description(WidgetStyle.hourly.summary)
+        .supportedFamilies(WidgetStyle.hourly.families)
+    }
+}
+
+struct DailyWidget: Widget {
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: WidgetStyle.daily.kind, intent: SelectPlaceIntent.self, provider: Provider(style: .daily)) {
+            WidgetEntryView(style: .daily, entry: $0)
+        }
+        .configurationDisplayName(WidgetStyle.daily.displayName)
+        .description(WidgetStyle.daily.summary)
+        .supportedFamilies(WidgetStyle.daily.families)
+    }
+}
+
+/// Gemeinsamer Rahmen aller Widgets: Ansicht der Art, Hintergrund nach Wetterlage, Tipp öffnet den Ort.
+struct WidgetEntryView: View {
+    let style: WidgetStyle
+    let entry: Entry
+
+    var body: some View {
+        StyledWidgetView(style: style, snapshot: entry.snapshot, family: entry.family)
+            .environment(\.locale, Fmt.locale)
+            .environment(\.timeZone, Fmt.timeZone)
+            .containerBackground(for: .widget) {
+                Theme.gradient(entry.snapshot?.condition ?? .cloudy, isDay: entry.snapshot?.isDay ?? true)
+            }
+            .widgetURL(URL(string: "witterung://place/\(entry.placeID)"))
+    }
 }
 
 // MARK: Konfiguration
@@ -80,11 +120,24 @@ struct Entry: TimelineEntry {
     let snapshot: WeatherSnapshot?
     let family: WidgetFamily
     let placeID: String
+    /// Nur „Im Blick“: Gewicht des wichtigsten Hinweises, damit der Smart Stack es nach oben holt.
+    var relevanceScore: Double?
+
+    var relevance: TimelineEntryRelevance? {
+        relevanceScore.map { TimelineEntryRelevance(score: Float($0)) }
+    }
 }
 
 struct Provider: AppIntentTimelineProvider {
+    let style: WidgetStyle
+
     func placeholder(in context: Context) -> Entry {
         Entry(date: .now, snapshot: nil, family: context.family, placeID: "current")
+    }
+
+    private func entry(_ snapshot: WeatherSnapshot?, at date: Date, place: PlaceEntity, context: Context) -> Entry {
+        Entry(date: date, snapshot: snapshot, family: context.family, placeID: place.id,
+              relevanceScore: style == .focus ? snapshot?.focus.score : nil)
     }
 
     #if os(watchOS)
@@ -94,7 +147,8 @@ struct Provider: AppIntentTimelineProvider {
         PlaceQuery.all().map { place in
             let intent = SelectPlaceIntent()
             intent.place = place
-            return AppIntentRecommendation(intent: intent, description: Text(place.name))
+            let name = style == .weather ? place.name : "\(style.displayName) · \(place.name)"
+            return AppIntentRecommendation(intent: intent, description: Text(name))
         }
     }
     #endif
@@ -104,8 +158,8 @@ struct Provider: AppIntentTimelineProvider {
         // Galerie: schnell aus dem Cache, nur ohne Cache übers Netz.
         var forecast = ForecastCache.load(place.ref)
         if forecast == nil { forecast = try? await fetch(place.ref) }
-        return Entry(date: .now, snapshot: forecast.flatMap { WeatherSnapshot.make($0, at: .now, placeName: name(place, $0)) },
-                     family: context.family, placeID: place.id)
+        return entry(forecast.flatMap { WeatherSnapshot.make($0, at: .now, placeName: name(place, $0)) },
+                     at: .now, place: place, context: context)
     }
 
     func timeline(for configuration: SelectPlaceIntent, in context: Context) async -> Timeline<Entry> {
@@ -115,12 +169,14 @@ struct Provider: AppIntentTimelineProvider {
         var forecast = try? await fetch(place.ref)
         if forecast == nil { forecast = ForecastCache.load(place.ref) }
         var entries = forecast.map { f in
-            WeatherSnapshot.timeline(f, now: now, placeName: name(place, f)).map {
-                Entry(date: $0.date, snapshot: $0, family: context.family, placeID: place.id)
+            WeatherSnapshot.timeline(f, now: now, dense: style.isDense, placeName: name(place, f)).map {
+                entry($0, at: $0.date, place: place, context: context)
             }
         } ?? []
-        if entries.isEmpty { entries = [Entry(date: now, snapshot: nil, family: context.family, placeID: place.id)] }
-        return Timeline(entries: entries, policy: .after(now.addingTimeInterval(30 * 60)))
+        if entries.isEmpty { entries = [entry(nil, at: now, place: place, context: context)] }
+        // Steht Warnung oder Regen laut Radar vorn, lohnt ein früherer neuer Abruf.
+        let urgent = style == .focus && entries.first?.snapshot?.focus.isUrgent == true
+        return Timeline(entries: entries, policy: .after(now.addingTimeInterval((urgent ? 15 : 30) * 60)))
     }
 
     private func name(_ place: PlaceEntity, _ forecast: Forecast) -> String {

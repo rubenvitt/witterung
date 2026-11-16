@@ -36,12 +36,17 @@ enum Theme {
         }
     }
 
-    static func alertLevel(_ severity: WeatherAlert.Severity) -> String {
-        switch severity {
-        case .minor: "Wetterwarnung"
-        case .moderate: "Markante Wetterwarnung"
-        case .severe: "Unwetterwarnung"
-        case .extreme: "Extreme Unwetterwarnung"
+    static func alertLevel(_ severity: WeatherAlert.Severity) -> String { severity.label }
+
+    /// Farbe eines Hinweises (Symbol im Fokus-Widget und auf der Karte „Im Blick“).
+    static func tone(_ tone: Insight.Tone) -> Color {
+        switch tone {
+        case let .alert(severity): alertColor(severity)
+        case .rain: Color(red: 0.45, green: 0.85, blue: 1.0)
+        case .cold: Color(red: 0.65, green: 0.88, blue: 1.0)
+        case .warm: Color(red: 1.0, green: 0.72, blue: 0.3)
+        case .wind: Color(red: 0.7, green: 0.95, blue: 0.85)
+        case .info, .calm: .white
         }
     }
 }

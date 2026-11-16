@@ -40,6 +40,31 @@ extension Condition {
     var isWet: Bool { [.drizzle, .rain, .heavyRain, .snow, .sleet, .hail, .thunderstorm].contains(self) }
 }
 
+extension WeatherAlert {
+    /// „STURMBÖEN“ → „Sturmböen“
+    var eventTitle: String { event.lowercased(with: Fmt.locale).capitalized(with: Fmt.locale) }
+
+    var timeRange: String { timeRange(now: .now) }
+
+    func timeRange(now: Date) -> String {
+        let start = onset <= now ? "seit \(Fmt.dayTime(onset, now: now))" : "ab \(Fmt.dayTime(onset, now: now))"
+        guard let expires else { return start }
+        return "\(start) bis \(Fmt.dayTime(expires, now: now))"
+    }
+}
+
+extension WeatherAlert.Severity {
+    /// Stufenname des DWD.
+    var label: String {
+        switch self {
+        case .minor: "Wetterwarnung"
+        case .moderate: "Markante Wetterwarnung"
+        case .severe: "Unwetterwarnung"
+        case .extreme: "Extreme Unwetterwarnung"
+        }
+    }
+}
+
 enum SourceNames {
     static func name(_ source: String) -> String {
         switch source {
@@ -186,6 +211,7 @@ struct WeatherSnapshot: Sendable {
         let temp: Double
         let symbol: String
         let precipProb: Double?
+        let precipMm: Double
     }
 
     struct Day: Sendable, Hashable {
@@ -194,6 +220,7 @@ struct WeatherSnapshot: Sendable {
         let max: Double
         let symbol: String
         let precipProb: Double?
+        let precipMm: Double
     }
 
     let date: Date
@@ -210,12 +237,28 @@ struct WeatherSnapshot: Sendable {
     let generatedAt: Date
     /// Apple-Weather-Marke zeigen (WeatherKit-Attribution, auch im Widget).
     let hasWeatherKit: Bool
+    /// Hinweise für diesen Zeitpunkt, das Wichtigste zuerst (nie leer).
+    let insights: [Insight]
+    /// Radar-Nowcast ab diesem Zeitpunkt in mm/h, 5-min-Schritte (leer ohne Radar).
+    let radar: [Double]
+
+    var focus: Insight { insights[0] }
 
     /// Einträge ab `now`: erst jetzt, dann zu jeder vollen Stunde, solange es Daten gibt.
-    static func timeline(_ forecast: Forecast, now: Date, count: Int = 8, placeName: String? = nil) -> [WeatherSnapshot] {
+    /// `dense`: in den ersten zwei Stunden (Radar) alle 15 Minuten, für das Fokus-Widget.
+    static func timeline(_ forecast: Forecast, now: Date, count: Int = 8, dense: Bool = false, placeName: String? = nil) -> [WeatherSnapshot] {
+        dates(now: now, count: count, dense: dense).compactMap { make(forecast, at: $0, placeName: placeName) }
+    }
+
+    static func dates(now: Date, count: Int = 8, dense: Bool = false) -> [Date] {
         let nextHour = Fmt.calendar.dateInterval(of: .hour, for: now)?.end ?? now.addingTimeInterval(3600)
-        let dates = [now] + (0..<(count - 1)).map { nextHour.addingTimeInterval(Double($0) * 3600) }
-        return dates.compactMap { make(forecast, at: $0, placeName: placeName) }
+        let hourly = (0..<(count - 1)).map { nextHour.addingTimeInterval(Double($0) * 3600) }
+        guard dense else { return [now] + hourly }
+        let quarter = 15.0 * 60
+        let nextQuarter = Date(timeIntervalSince1970: (now.timeIntervalSince1970 / quarter).rounded(.down) * quarter + quarter)
+        let quarters = (0..<8).map { nextQuarter.addingTimeInterval(Double($0) * quarter) }
+        let radarEnd = now.addingTimeInterval(2 * 3600)
+        return [now] + quarters.filter { $0 < radarEnd } + hourly.filter { $0 >= radarEnd }
     }
 
     static func make(_ forecast: Forecast, at date: Date, placeName: String? = nil) -> WeatherSnapshot? {
@@ -235,16 +278,18 @@ struct WeatherSnapshot: Sendable {
             min: day?.tempMinC,
             max: day?.tempMaxC,
             rainHint: forecast.rainHint(at: date),
-            hours: forecast.hourly.filter { $0.at > date }.prefix(6).map {
+            hours: forecast.hourly.filter { $0.at > date }.prefix(24).map {
                 Hour(at: $0.at, temp: $0.consensus.tempC, symbol: $0.consensus.condition.symbol(isDay: $0.consensus.isDay ?? true),
-                     precipProb: $0.consensus.precipProbPct)
+                     precipProb: $0.consensus.precipProbPct, precipMm: $0.consensus.precipMm)
             },
-            days: forecast.daily.filter { $0.date >= Fmt.dayString(date) }.prefix(5).map {
+            days: forecast.daily.filter { $0.date >= Fmt.dayString(date) }.prefix(10).map {
                 Day(date: $0.date, min: $0.consensus.tempMinC, max: $0.consensus.tempMaxC,
-                    symbol: $0.consensus.condition.symbol(), precipProb: $0.consensus.precipProbPct)
+                    symbol: $0.consensus.condition.symbol(), precipProb: $0.consensus.precipProbPct, precipMm: $0.consensus.precipMm)
             },
             generatedAt: forecast.generatedAt,
-            hasWeatherKit: forecast.hasWeatherKit
+            hasWeatherKit: forecast.hasWeatherKit,
+            insights: Insight.rank(forecast, at: date),
+            radar: (forecast.nowcast?.points ?? []).filter { $0.at.addingTimeInterval(300) > date }.map(\.precipMmH)
         )
     }
 }

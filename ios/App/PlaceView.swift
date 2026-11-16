@@ -20,14 +20,15 @@ struct PlaceView: View {
         ScrollView {
             VStack(spacing: Layout.sectionSpacing) {
                 if let forecast {
+                    // Was gerade zählt, bestimmt die Reihenfolge der Karten (Insight.swift).
+                    let now = Date.now
+                    let insights = Insight.rank(forecast, at: now)
                     HeaderView(title: model.title(ref), isCurrent: ref == .current, forecast: forecast)
                     FreshnessBadge(forecast: forecast, failure: model.failures[ref], loading: model.loading.contains(ref))
-                    ForEach(forecast.alerts) { AlertCard(alert: $0) }
-                    NowcastCard(forecast: forecast)
-                    HourlyCard(forecast: forecast).id("hourly")
-                    DailyCard(forecast: forecast, ref: ref).id("daily")
-                    CurrentDetailsCard(forecast: forecast).id("details")
-                    SourcesCard(forecast: forecast, ref: ref)
+                    ForEach(PlaceSection.order(for: insights), id: \.self) { section in
+                        card(section, forecast: forecast, insights: insights, now: now)
+                            .id(section.rawValue)
+                    }
                     AttributionFooter(forecast: forecast, ref: ref)
                 } else {
                     placeholder
@@ -38,6 +39,7 @@ struct PlaceView: View {
             .padding(.bottom, Spacing.xl)
         }
         .scrollIndicators(.hidden)
+        .animation(.snappy, value: forecast.map { PlaceSection.order(for: Insight.rank($0, at: .now)) })
         #if DEBUG
         .task(id: forecast == nil) {
             // Screenshots: `-scrollTo daily` springt zu einem Abschnitt.
@@ -57,6 +59,22 @@ struct PlaceView: View {
         .foregroundStyle(.white)
         .task(id: ref) {
             if forecast == nil { await model.refresh(ref) }
+        }
+    }
+
+    @ViewBuilder
+    private func card(_ section: PlaceSection, forecast: Forecast, insights: [Insight], now: Date) -> some View {
+        switch section {
+        case .alerts:
+            if !forecast.alerts.isEmpty {
+                VStack(spacing: Layout.sectionSpacing) { ForEach(forecast.alerts) { AlertCard(alert: $0) } }
+            }
+        case .focus: FocusCard(forecast: forecast, insights: insights, now: now)
+        case .nowcast: NowcastCard(forecast: forecast)
+        case .hourly: HourlyCard(forecast: forecast)
+        case .daily: DailyCard(forecast: forecast, ref: ref)
+        case .details: CurrentDetailsCard(forecast: forecast)
+        case .sources: SourcesCard(forecast: forecast, ref: ref)
         }
     }
 
@@ -169,12 +187,5 @@ struct Card<Content: View>: View {
         .padding(Layout.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: Layout.cardRadius, style: .continuous))
-    }
-}
-
-extension Fmt {
-    /// „15:00“ heute, sonst „Di 04:00“.
-    static func dayTime(_ date: Date, now: Date = .now) -> String {
-        calendar.isDate(date, inSameDayAs: now) ? time(date) : "\(weekday(dayString(date), now: now)) \(time(date))"
     }
 }
