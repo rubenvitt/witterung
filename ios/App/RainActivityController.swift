@@ -3,8 +3,10 @@ import Foundation
 
 /// Startet, aktualisiert und beendet die Live-Aktivität „Regen in …“ für die erste Seite
 /// (Standort, sonst der erste Ort). Läuft nur, solange die App im Vordergrund lädt; der
-/// Countdown zählt danach selbst weiter und verschwindet nach Regenbeginn.
-@MainActor
+/// Countdown zählt danach selbst weiter.
+///
+/// Bewusst nicht an den Haupt-Actor gebunden: `Activity` ist nicht `Sendable`, und Lesen,
+/// Aktualisieren und Beenden müssen im selben (nicht isolierten) Kontext passieren.
 enum RainActivityController {
     /// Höchstens so weit voraus (Minuten) wird die Aktivität gestartet.
     static let lead = 60
