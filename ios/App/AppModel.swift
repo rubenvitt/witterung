@@ -18,6 +18,11 @@ final class AppModel {
     private(set) var decisions: [PlaceRef: JevDecision] = [:]
     /// Ältere Vorhersage zum Vergleich („Regen jetzt früher“), je Ort.
     private(set) var baselines: [PlaceRef: ForecastDigest] = [:]
+    /// Termine draußen aus dem Gerätekalender (nur mit Freigabe), für Hinweise wie „Regen zu …“.
+    private(set) var events: [CalendarEvent] = CalendarStore.load()
+    /// Was die Person antippt; steuert Kartenreihenfolge, Ansicht und Gewichte ein wenig.
+    private(set) var habits: UsageStats = UsageStore.load()
+    private(set) var calendarEnabled = SharedStore.calendarEnabled
     private(set) var serverURL = SharedStore.serverURL
     private(set) var signedIn = !API.needsAuth(SharedStore.serverURL) || TokenStore.token != nil
     var message: String?
@@ -56,10 +61,46 @@ final class AppModel {
         return location.coordinate
     }
 
+    // MARK: Persönliches
+
+    /// Kalender neu lesen und Vorlieben laden (beim Start und nach Änderungen).
+    func reloadPersonal() {
+        CalendarSync.refresh()
+        events = CalendarStore.load()
+        habits = UsageStore.load()
+    }
+
+    /// Kalender einbeziehen: fragt beim Einschalten nach Zugriff.
+    func setCalendarEnabled(_ enabled: Bool) async {
+        if enabled, !CalendarSync.isAuthorized {
+            guard await CalendarSync.requestAccess() else {
+                message = "Ohne Kalenderzugriff kann Witterung keine Termine einbeziehen. Freigabe in Einstellungen → Datenschutz → Kalender."
+                calendarEnabled = false
+                return
+            }
+        }
+        SharedStore.calendarEnabled = enabled
+        calendarEnabled = enabled
+        reloadPersonal()
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// Tipp auf eine Karte oder ein Widget merken.
+    func recordUse(mode: String? = nil, kind: String? = nil, section: String? = nil) {
+        UsageStore.record(mode: mode, kind: kind, section: section)
+        habits = UsageStore.load()
+    }
+
+    func resetHabits() {
+        UsageStore.reset()
+        habits = UsageStore.load()
+    }
+
     // MARK: Laden
 
     func start() async {
         PhoneSync.shared.push()
+        reloadPersonal()
         guard signedIn else { return }
         location.start { [weak self] _ in
             PhoneSync.shared.push()
@@ -109,7 +150,9 @@ final class AppModel {
             DigestStore.record(forecast, for: ref)
             baselines[ref] = DigestStore.baseline(ref, now: .now)
             decisions[ref] = await JevClient.decide(forecast, ref: ref, placeName: title(ref), at: .now,
-                                                    baseline: baselines[ref], api: api)
+                                                    baseline: baselines[ref], events: events, habits: habits, api: api)
+            // „Regen in …“ als Live-Aktivität, für die erste Seite (Standort, sonst erster Ort).
+            if ref == pages.first { await RainActivityController.update(forecast: forecast, placeName: title(ref)) }
             if manual {
                 refreshTick += 1
                 WidgetCenter.shared.reloadAllTimelines()

@@ -262,9 +262,10 @@ struct WeatherSnapshot: Sendable {
     /// `dense`: in den ersten zwei Stunden (Radar) alle 15 Minuten, für das Fokus-Widget.
     /// `decision`: Entscheidungen von Jev; die Reihenfolge gilt für jeden Eintrag, dessen Hinweise dieselben sind.
     static func timeline(_ forecast: Forecast, now: Date, count: Int = 8, dense: Bool = false, placeName: String? = nil,
-                         baseline: ForecastDigest? = nil, decision: JevDecision? = nil) -> [WeatherSnapshot] {
+                         baseline: ForecastDigest? = nil, events: [CalendarEvent] = [], habits: UsageStats? = nil,
+                         decision: JevDecision? = nil) -> [WeatherSnapshot] {
         dates(now: now, count: count, dense: dense).compactMap {
-            make(forecast, at: $0, placeName: placeName, baseline: baseline, decision: decision)
+            make(forecast, at: $0, placeName: placeName, baseline: baseline, events: events, habits: habits, decision: decision)
         }
     }
 
@@ -280,15 +281,15 @@ struct WeatherSnapshot: Sendable {
     }
 
     static func make(_ forecast: Forecast, at date: Date, placeName: String? = nil, baseline: ForecastDigest? = nil,
-                     decision: JevDecision? = nil) -> WeatherSnapshot? {
+                     events: [CalendarEvent] = [], habits: UsageStats? = nil, decision: JevDecision? = nil) -> WeatherSnapshot? {
         // Ohne Stundenwert für `date` ist die Vorhersage abgelaufen: lieber „keine Daten“ als alte Werte.
         guard let row = forecast.hour(at: date)?.consensus else { return nil }
         // Beobachtung gilt, solange sie frisch ist; danach die Prognose der Stunde.
         let observed = forecast.now.observed.flatMap { o in date.timeIntervalSince(o.at) < 90 * 60 ? o : nil }
         let day = forecast.day(at: date)?.consensus
         let isDay = row.isDay ?? true
-        let insights = Insight.ranked(forecast, at: date, baseline: baseline, decision: decision)
-        let mode = WidgetMode.decide(insights, at: date, decision: decision)
+        let insights = Insight.ranked(forecast, at: date, baseline: baseline, events: events, habits: habits, decision: decision)
+        let mode = WidgetMode.decide(insights, at: date, decision: decision, habits: habits)
         let night = NightOutlook.make(forecast, at: date)
         return WeatherSnapshot(
             date: date,

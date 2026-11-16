@@ -4,8 +4,9 @@ import Foundation
 /// Antwort je Ort im App-Group-Container. Jeder Fehler heißt: Regeln entscheiden.
 enum JevClient {
     static func decide(_ forecast: Forecast, ref: PlaceRef, placeName: String, at now: Date,
-                       baseline: ForecastDigest? = nil, api: API = API()) async -> JevDecision? {
-        let request = DecisionRequest.make(forecast, placeName: placeName, at: now, baseline: baseline)
+                       baseline: ForecastDigest? = nil, events: [CalendarEvent] = [], habits: UsageStats? = nil,
+                       api: API = API()) async -> JevDecision? {
+        let request = DecisionRequest.make(forecast, placeName: placeName, at: now, baseline: baseline, events: events, habits: habits)
         do {
             let decision = try await api.decide(request)
             DecisionCache.store(decision, for: ref)

@@ -9,7 +9,8 @@ import Foundation
 /// damit sie in Tests und auf jeder Plattform gleich läuft.
 struct Insight: Sendable, Hashable, Identifiable {
     enum Kind: String, Sendable, Hashable, CaseIterable {
-        case alert, rainNow, rainSoon, thunder, storm, ice, frost, snow, heat, rainLater, change, shift, walk, uncertain, calm
+        case alert, rainNow, rainSoon, event, thunder, storm, ice, frost, snow, heat, rainLater, change, shift, walk, weekend, golden,
+             uncertain, calm
     }
 
     /// Farbe im Widget und auf der Karte (Theme.tone).
@@ -22,7 +23,7 @@ struct Insight: Sendable, Hashable, Identifiable {
 
     let kind: Kind
     /// 0…1. Bestimmt die Reihenfolge und die Relevanz im Smart Stack.
-    let score: Double
+    var score: Double
     /// „Regen in 25 Minuten“
     let title: String
     /// „ab 13:25, bis etwa 15:00“
@@ -39,6 +40,8 @@ struct Insight: Sendable, Hashable, Identifiable {
     let shortDetail: String
     /// Herkunft in einem Wort: „DWD“, „Radar“, „Konsens“.
     let source: String
+    /// Text für Jev, wenn Titel und Detail Privates enthalten (Kalendertermine): nie der Terminname.
+    var jevText: String?
     /// Gesetzt, wenn Jev diesen Hinweis nach vorn geholt hat (Decision.swift).
     var jevProbability: Double?
 
@@ -47,7 +50,7 @@ struct Insight: Sendable, Hashable, Identifiable {
     var visual: Visual {
         switch kind {
         case .rainNow, .rainSoon: .radar
-        case .heat, .change: .days
+        case .heat, .change, .weekend: .days
         default: .hours
         }
     }
@@ -60,11 +63,14 @@ extension Insight {
     /// Alle Hinweise für `now`, das Wichtigste zuerst. Nie leer: Ohne Auffälliges gibt es „Ruhiges Wetter“.
     /// `baseline`: eine ältere Vorhersage zum Vergleich („Regen jetzt früher“), `window`: das
     /// Gassi-Fenster, das Jev gewählt hat (`WalkWindow.id`).
-    static func rank(_ forecast: Forecast, at now: Date, baseline: ForecastDigest? = nil, window: String? = nil) -> [Insight] {
-        let context = Context(forecast: forecast, now: now, baseline: baseline)
+    /// `events`: Termine aus dem Kalender (nur mit Freigabe), `habits`: was die Person oft antippt.
+    static func rank(_ forecast: Forecast, at now: Date, baseline: ForecastDigest? = nil, events: [CalendarEvent] = [],
+                     habits: UsageStats? = nil, window: String? = nil) -> [Insight] {
+        let context = Context(forecast: forecast, now: now, baseline: baseline, events: events)
         let candidates: [Insight?] = [
             context.alert(),
             context.rain(),
+            context.event(),
             context.thunder(),
             context.storm(),
             context.cold(),
@@ -72,9 +78,17 @@ extension Insight {
             context.change(),
             context.shift(),
             context.walk(choice: window),
+            context.weekend(),
+            context.golden(),
             context.uncertain(),
         ]
-        let found = candidates.compactMap { $0 }.sorted { $0.score > $1.score }
+        // Was die Person oft antippt, rückt ein wenig nach vorn (UsageStats).
+        let favorites = Set(habits?.favoriteKinds ?? [])
+        let found = candidates.compactMap { $0 }.map { insight in
+            var boosted = insight
+            if favorites.contains(insight.kind) { boosted.score = min(1, boosted.score + UsageStats.boost) }
+            return boosted
+        }.sorted { $0.score > $1.score }
         return found.isEmpty ? [context.calm()] : found
     }
 
@@ -84,7 +98,7 @@ extension Insight {
 
     /// Trockene Zeitfenster für den Gassigang (Kandidaten für Jev).
     static func walkWindows(_ forecast: Forecast, at now: Date) -> [WalkWindow] {
-        Context(forecast: forecast, now: now, baseline: nil).walkWindows()
+        Context(forecast: forecast, now: now, baseline: nil, events: []).walkWindows()
     }
 }
 
@@ -93,6 +107,7 @@ private struct Context {
     let forecast: Forecast
     let now: Date
     let baseline: ForecastDigest?
+    let events: [CalendarEvent]
 
     /// Stunden ab der laufenden bis `hours` voraus.
     func upcoming(_ hours: Double) -> [HourRow] {
@@ -421,6 +436,92 @@ private struct Context {
             short: "Morgen \(colder ? "kälter" : "wärmer")", shortDetail: "\(Fmt.temp(isNow)) statt \(Fmt.temp(was))", source: "Vergleich")
     }
 
+    // MARK: Termine, Wochenende, goldene Stunde
+
+    /// Der nächste Termin draußen (mit Ort oder passendem Titel) in 24 h, bei dem das Wetter stört:
+    /// Warnung, Regen, Böen ab 50 km/h oder Frost.
+    func event() -> Insight? {
+        let upcoming = events.filter { $0.outdoor && $0.end > now && $0.start < now.addingTimeInterval(24 * 3600) }
+            .sorted { $0.start < $1.start }
+        for e in upcoming {
+            let rows = forecast.hourly.filter { $0.at.addingTimeInterval(3600) > max(e.start, now) && $0.at < e.end }
+            guard !rows.isEmpty else { continue }
+            let precip = rows.map(\.consensus.precipMm).max() ?? 0
+            let strongest = rows.map { gust($0.consensus) }.max() ?? 0
+            let coldest = rows.map(\.consensus.tempC).min() ?? 10
+            let alert = activeAlerts.first { $0.onset < e.end && ($0.expires ?? .distantFuture) > e.start }
+            let (word, tone): (String, Insight.Tone)
+            if let alert {
+                (word, tone) = (alert.eventTitle, .alert(alert.severity))
+            } else if precip >= 0.2 {
+                (word, tone) = ("Regen", .rain)
+            } else if strongest >= 50 {
+                (word, tone) = ("Böen", .wind)
+            } else if coldest <= 0 {
+                (word, tone) = ("Frost", .cold)
+            } else {
+                continue
+            }
+            let name = e.title.count > 22 ? String(e.title.prefix(21)) + "…" : e.title
+            let mean = rows.map(\.consensus.tempC).reduce(0, +) / Double(rows.count)
+            let facts = [precip >= 0.2 ? Fmt.mm(precip) : nil, strongest >= 50 ? "Böen \(Fmt.kmh(strongest))" : nil, Fmt.temp(mean)]
+                .compactMap { $0 }.joined(separator: " · ")
+            let when = Fmt.dayTime(e.start, now: now)
+            return Insight(
+                kind: .event, score: e.start < now.addingTimeInterval(3 * 3600) ? 0.62 : 0.48,
+                title: "\(word) zu „\(name)“", detail: "\(when) · \(facts)",
+                reason: "Termin draußen in deinem Kalender",
+                symbol: "calendar.badge.exclamationmark", tone: tone, badge: "\(Fmt.calendar.component(.hour, from: e.start))h",
+                short: alert != nil ? "Termin: Warnung" : "Termin: \(word)", shortDetail: when, source: "Kalender",
+                jevText: "Termin draußen \(when): \(word), \(facts)")
+        }
+        return nil
+    }
+
+    /// Donnerstag ab Mittag und Freitag: wie wird das Wochenende, und welcher Tag ist besser für draußen?
+    func weekend() -> Insight? {
+        let calendar = Fmt.calendar
+        let weekday = calendar.component(.weekday, from: now) // 1 = So … 5 = Do, 6 = Fr
+        guard (weekday == 5 && calendar.component(.hour, from: now) >= 12) || weekday == 6 else { return nil }
+        let saturday = calendar.date(byAdding: .day, value: 7 - weekday, to: calendar.startOfDay(for: now)) ?? now
+        guard let sat = forecast.day(at: saturday.addingTimeInterval(12 * 3600))?.consensus,
+              let sun = forecast.day(at: saturday.addingTimeInterval(36 * 3600))?.consensus else { return nil }
+        func word(_ d: DayPoint) -> String { d.precipMm >= 1 ? "Regen" : d.condition.label() }
+        let better: String? = switch (sat.precipMm >= 1, sun.precipMm >= 1) {
+        case (true, false): "Sonntag"
+        case (false, true): "Samstag"
+        default: nil
+        }
+        return Insight(
+            kind: .weekend, score: weekday == 6 ? 0.34 : 0.28,
+            title: "Wochenende: Sa \(word(sat)), So \(word(sun))",
+            detail: "Sa \(Fmt.temp(sat.tempMinC)) bis \(Fmt.temp(sat.tempMaxC)) · So \(Fmt.temp(sun.tempMinC)) bis \(Fmt.temp(sun.tempMaxC))"
+                + (better.map { " · draußen eher am \($0)" } ?? ""),
+            reason: "Tagesvorhersage für Samstag und Sonntag",
+            symbol: "calendar", tone: .info, badge: "WE",
+            short: better.map { "WE: eher \($0.prefix(2))" } ?? "Wochenende",
+            shortDetail: "Sa \(Fmt.temp(sat.tempMaxC)) · So \(Fmt.temp(sun.tempMaxC))", source: "Konsens")
+    }
+
+    /// Die Stunde vor Sonnenuntergang, wenn sie trocken und kaum bewölkt ist: schönes Licht für die Runde.
+    func golden() -> Insight? {
+        guard let sunset = forecast.day(at: now)?.consensus.sunset, sunset > now, sunset < now.addingTimeInterval(8 * 3600) else {
+            return nil
+        }
+        let start = sunset.addingTimeInterval(-3600)
+        guard let row = forecast.hour(at: max(start, now)) else { return nil }
+        let c = row.consensus
+        guard c.precipMm < 0.1, (c.cloudPct ?? 100) < 50, !c.condition.isWet else { return nil }
+        let from = max(start, now)
+        return Insight(
+            kind: .golden, score: start < now.addingTimeInterval(3 * 3600) ? 0.3 : 0.24,
+            title: "Goldene Stunde ab \(Fmt.time(from))",
+            detail: "bis \(Fmt.time(sunset)) · \(c.cloudPct.map { "\(Int($0.rounded())) % Wolken" } ?? "klar") · \(Fmt.temp(c.tempC))",
+            reason: "Letzte Stunde vor Sonnenuntergang, trocken und kaum Wolken",
+            symbol: "sun.horizon.fill", tone: .warm, badge: Fmt.time(from),
+            short: "Goldene Stunde", shortDetail: "\(Fmt.time(from))–\(Fmt.time(sunset))", source: "Konsens")
+    }
+
     // MARK: Quellen
 
     /// Uneinige Quellen: große Temperatur-Spannbreite oder Regen, den nur ein Teil erwartet.
@@ -479,7 +580,7 @@ enum PlaceSection: String, CaseIterable, Sendable {
     /// Regen → Radar vor allem anderen, Umschwung oder Hitze → 10 Tage vor den Stunden,
     /// Wind → Messwerte nach oben, uneinige Quellen → Quellenvergleich nach oben.
     /// Abends (ab 17 Uhr) und nachts rückt „Heute Nacht“ nach oben, tagsüber steht es nach den 10 Tagen.
-    static func order(for insights: [Insight], at now: Date = .now) -> [PlaceSection] {
+    static func order(for insights: [Insight], at now: Date = .now, habits: UsageStats? = nil) -> [PlaceSection] {
         let hour = Fmt.calendar.component(.hour, from: now)
         let evening = hour >= 17 || hour < 5
         var order: [PlaceSection] = [.alerts, .focus, .nowcast, .hourly, .daily, .details, .sources]
@@ -494,6 +595,12 @@ enum PlaceSection: String, CaseIterable, Sendable {
         }
         let tonightAfter: PlaceSection = evening ? .focus : .daily
         order.insert(.tonight, at: (order.firstIndex(of: tonightAfter) ?? order.count - 1) + 1)
+        // Die Karte, die die Person am häufigsten antippt, rückt hinter „Im Blick“ (nicht vor Radar-Regen).
+        if let favorite = habits?.favoriteSections.first(where: { ![.alerts, .focus].contains($0) }),
+           let from = order.firstIndex(of: favorite), let focus = order.firstIndex(of: .focus), from > focus + 1 {
+            order.remove(at: from)
+            order.insert(favorite, at: focus + 1)
+        }
         return order
     }
 }

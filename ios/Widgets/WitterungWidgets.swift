@@ -10,6 +10,9 @@ struct WitterungWidgetBundle: WidgetBundle {
         FocusWidget()
         HourlyWidget()
         DailyWidget()
+        #if os(iOS)
+        RainActivityWidget()
+        #endif
     }
 }
 
@@ -70,7 +73,19 @@ struct WidgetEntryView: View {
             .containerBackground(for: .widget) {
                 Theme.gradient(entry.snapshot?.condition ?? .cloudy, isDay: entry.snapshot?.isDay ?? true)
             }
-            .widgetURL(URL(string: "witterung://place/\(entry.placeID)"))
+            .widgetURL(Self.url(style: style, entry: entry))
+    }
+
+    /// witterung://place/<id>?style=focus&mode=hours&kind=walk – die App merkt sich, was angetippt wurde.
+    static func url(style: WidgetStyle, entry: Entry) -> URL? {
+        var components = URLComponents(string: "witterung://place/\(entry.placeID)")
+        var items = [URLQueryItem(name: "style", value: style.rawValue)]
+        if style == .focus, let s = entry.snapshot {
+            items.append(URLQueryItem(name: "mode", value: s.mode.rawValue))
+            items.append(URLQueryItem(name: "kind", value: s.focus.kind.rawValue))
+        }
+        components?.queryItems = items
+        return components?.url
     }
 }
 
@@ -158,10 +173,12 @@ struct Provider: AppIntentTimelineProvider {
         // Galerie: schnell aus dem Cache, nur ohne Cache übers Netz.
         var forecast = ForecastCache.load(place.ref)
         if forecast == nil { forecast = try? await fetch(place.ref) }
-        let decision = style == .focus ? DecisionCache.load(place.ref) : nil
-        let baseline = style == .focus ? DigestStore.baseline(place.ref, now: .now) : nil
+        let focus = style == .focus
+        let decision = focus ? DecisionCache.load(place.ref) : nil
+        let baseline = focus ? DigestStore.baseline(place.ref, now: .now) : nil
         return entry(forecast.flatMap {
-            WeatherSnapshot.make($0, at: .now, placeName: name(place, $0), baseline: baseline, decision: decision)
+            WeatherSnapshot.make($0, at: .now, placeName: name(place, $0), baseline: baseline,
+                                 events: focus ? CalendarStore.load() : [], habits: focus ? UsageStore.load() : nil, decision: decision)
         }, at: .now, place: place, context: context)
     }
 
@@ -175,14 +192,18 @@ struct Provider: AppIntentTimelineProvider {
         // ohne Antwort entscheiden die Regeln. Vergleich mit einer älteren Vorhersage.
         var decision: JevDecision?
         var baseline: ForecastDigest?
+        // Termine und Vorlieben legt die App ab; nur „Im Blick“ nutzt sie.
+        let events = style == .focus ? CalendarStore.load(now: now) : []
+        let habits = style == .focus ? UsageStore.load() : nil
         if style == .focus, let forecast {
             DigestStore.record(forecast, for: place.ref)
             baseline = DigestStore.baseline(place.ref, now: now)
-            decision = await JevClient.decide(forecast, ref: place.ref, placeName: name(place, forecast), at: now, baseline: baseline)
+            decision = await JevClient.decide(forecast, ref: place.ref, placeName: name(place, forecast), at: now,
+                                              baseline: baseline, events: events, habits: habits)
         }
         var entries = forecast.map { f in
             WeatherSnapshot.timeline(f, now: now, dense: style.isDense, placeName: name(place, f),
-                                     baseline: baseline, decision: decision).map {
+                                     baseline: baseline, events: events, habits: habits, decision: decision).map {
                 entry($0, at: $0.date, place: place, context: context)
             }
         } ?? []

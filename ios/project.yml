@@ -63,6 +63,10 @@ targets:
         CFBundleLocalizations: [de]
         ITSAppUsesNonExemptEncryption: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Termine draußen („Regen zu …“), nur nach Einschalten in den Einstellungen.
+        NSCalendarsFullAccessUsageDescription: "Witterung prüft das Wetter zu deinen Terminen draußen. Die Termine bleiben auf dem Gerät."
+        # Live-Aktivität „Regen in …“ (Sperrbildschirm, Dynamic Island).
+        NSSupportsLiveActivities: true
         # Lokaler Dev-Server über http://localhost
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

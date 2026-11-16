@@ -55,13 +55,15 @@ starten (der Versuch zählt mit). Für eine neue Version `MARKETING_VERSION` erh
 
 ### Tests
 
-49 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
+54 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
 (Uelzen im November, Warnungen, Regen in 25 min, eine Quelle mit Kontingentfehler),
 PKCE-Testvektor aus RFC 7636 Anhang B, Nowcast-Sätze, Regenhinweis und stündliche
 Widget-Timeline, WMS-BBOX-Rechnung, deutsche Zahlen- und Zeitformate, dazu
 `InsightTests` für jede Regel von „Im Blick“, die Gewichte gegeneinander und die
 Kartenreihenfolge, `DecisionTests` für Jevs Entscheidungen (Schwelle, Leitplanken, Ansicht, Fenster, Karten, stabile
-Anfrage) und `OutlookTests` für Kurztexte, Nacht, Kernsatz, Anzieh-Tipp und „Vorhersage geändert“.
+Anfrage) `OutlookTests` für Kurztexte, Nacht, Kernsatz, Anzieh-Tipp und „Vorhersage geändert“ und
+`PersonalTests` für Termine (auch dass Jev keine Terminnamen sieht), Wochenende, goldene Stunde und
+gelernte Vorlieben.
 
 Das Testbundle läuft ohne Host-App. Hängt `xcodebuild test` mit „The test runner hung
 before establishing connection“ (auf dem Entwicklungsrechner am 09.11.2026 so, der
@@ -188,7 +190,10 @@ der Hinweis mit dem höchsten Gewicht steht vorn.
 | Schnee, Regen später | erste nasse Stunde nach dem Radar, 12 h | 0,3–0,6 (+0,1 Schnee, ×0,8 wenn < 50 % der Quellen) |
 | Hitze | Höchstwert ≥ 25°/30° heute oder morgen | 0,3/0,6 |
 | Frost | Tiefstwert < 0,5° in 18 h | 0,45, „möglich“ 0,35, ≤ −5° 0,55 |
-| Gassi-Fenster | regnet es in 12 h: erste trockene Lücke ≥ 2 h zwischen 6 und 22 Uhr | 0,42 |
+| Termin draußen | Termin mit Ort oder Draußen-Titel in 24 h, dabei Warnung, Regen, Böen ≥ 50 oder Frost | 0,48, in < 3 h 0,62 |
+| Gassi-Fenster | regnet es in 12 h: erste trockene Lücke ≥ 2 h zwischen 6 und 22 Uhr (oder Jevs Wahl) | 0,42 |
+| Wochenende | Do ab 12 Uhr und Fr: Sa und So, welcher Tag besser für draußen ist | 0,28, Fr 0,34 |
+| Goldene Stunde | Stunde vor Sonnenuntergang trocken und < 50 % Wolken, in 8 h | 0,24, in < 3 h 0,3 |
 | Vorhersage geändert | Regen ≥ 2 h früher/später, neu oder abgesagt; morgen ≥ 3° anders | 0,3–0,4 |
 | Umschwung | morgen ≥ 5° wärmer/kälter | 0,38–0,5 |
 | Quellen uneinig | Temperatur-Spannbreite ≥ 5° oder 30–70 % Regen-Einigkeit | 0,25 |
@@ -217,6 +222,29 @@ nichts los, abends die Nacht, tagsüber die Übersicht.
 **Sperrbildschirm und Watch** zeigen nur Kurztexte (`Insight.short`, `shortDetail`, `source`, je
 höchstens etwa 14–18 Zeichen: „Regen 13:25“ · „bis 15:00“ · „8° · Radar“), damit nichts mit „…“
 endet; ein Test prüft die Längen für alle Regeln.
+
+**Termine.** Mit „Kalender einbeziehen“ (Einstellungen, fragt nach Kalenderzugriff) liest die
+App beim Öffnen die Termine der nächsten 36 Stunden aus allen Kalendern des Geräts (EventKit,
+ohne ganztägige; `App/CalendarSync.swift`) und legt sie für die Widgets im App-Group-Container
+ab. Als „draußen“ gilt ein Termin mit Ort (kein Videocall) oder mit passendem Titel (Gassi,
+Hundeschule, Training, Garten, Einsatz, …; `CalendarEvent.isOutdoor`). Stört das Wetter, kommt
+„Regen zu „Hundeschule““. Die Termine verlassen das Gerät nicht: Jev bekommt nur
+„Termin draußen 15:00: Regen, 0,8 mm · 8°“ (`Insight.jevText`), ein Test prüft das.
+
+**Lernen aus der Nutzung.** Die App merkt sich Taps auf Karten der Ortsseite und auf „Im Blick“
+(Ansicht und Hinweis stehen in der Widget-URL, `witterung://place/<id>?style=focus&mode=…&kind=…`),
+mit drei Wochen Halbwertszeit (`UsageStats`). Ab drei gewichteten Taps gilt etwas als Vorliebe:
+Lieblingshinweise bekommen +0,05, die Lieblingskarte rückt hinter „Im Blick“, an ruhigen Tagen
+zeigt das Widget die Lieblingsansicht (Stunden oder Tage). Jev bekommt nur die Kurzfassung
+(„Öffnet oft: Stundenverlauf; achtet oft auf: Gassi-Fenster“). Ansehen und zurücksetzen unter
+Einstellungen → Gelernt.
+
+**Live-Aktivität „Regen in …“.** Zeigt das Radar Regenbeginn in höchstens 60 Minuten für die erste
+Seite (Standort, sonst der erste Ort), startet die App beim Laden eine Live-Aktivität mit Countdown
+auf dem Sperrbildschirm und in der Dynamic Island (`App/RainActivityController.swift`,
+`Widgets/RainActivityWidget.swift`); ab Regenbeginn steht dort „jetzt“. Ohne Push-Server geht das
+nur, solange die App im Vordergrund lädt; beendet wird die Aktivität beim nächsten Laden ohne Regen
+in Sicht (sonst vom System nach spätestens acht Stunden).
 
 **Vorhersage geändert.** App und Widget merken sich je gespeichertem Ort stündlich eine
 Kurzfassung der Vorhersage (`ForecastDigest`, höchstens 24). Verglichen wird mit dem jüngsten

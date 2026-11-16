@@ -13,14 +13,15 @@ struct InsightTests {
     static func forecast(
         temps: [Double], precip: [Double]? = nil, gusts: [Double]? = nil, conditions: [Condition]? = nil,
         tempSpread: Double = 1, agreement: Double? = nil, days: [(min: Double, max: Double)] = [(2, 8), (2, 8)],
-        alerts: [WeatherAlert] = [], nowcast: Nowcast? = nil
+        alerts: [WeatherAlert] = [], nowcast: Nowcast? = nil, dayPrecip: [Double]? = nil, clouds: Double = 50,
+        sunset: Date? = nil
     ) -> Forecast {
         let hourly = temps.indices.map { i in
             let at = start.addingTimeInterval(Double(i) * 3600)
             let mm = precip?[i] ?? 0
             let point = HourPoint(
                 at: at, tempC: temps[i], feelsLikeC: nil, precipMm: mm, precipProbPct: mm >= 0.1 ? 80 : 5,
-                windKmh: 10, gustKmh: gusts?[i], windDirDeg: 225, cloudPct: 50, humidityPct: 80, pressureHpa: 1015,
+                windKmh: 10, gustKmh: gusts?[i], windDirDeg: 225, cloudPct: clouds, humidityPct: 80, pressureHpa: 1015,
                 condition: conditions?[i] ?? (mm >= 0.1 ? .rain : .cloudy), isDay: true)
             let spread = HourSpread(
                 tempC: ValueRange(min: temps[i] - tempSpread / 2, max: temps[i] + tempSpread / 2),
@@ -30,8 +31,9 @@ struct InsightTests {
         }
         let daily = days.indices.map { i in
             let date = Fmt.dayString(start.addingTimeInterval(Double(i) * 86_400))
-            let point = DayPoint(date: date, tempMinC: days[i].min, tempMaxC: days[i].max, precipMm: 0, precipProbPct: nil,
-                                 windMaxKmh: nil, gustMaxKmh: nil, condition: .cloudy, sunrise: nil, sunset: nil)
+            let point = DayPoint(date: date, tempMinC: days[i].min, tempMaxC: days[i].max, precipMm: dayPrecip?[i] ?? 0,
+                                 precipProbPct: nil, windMaxKmh: nil, gustMaxKmh: nil, condition: .cloudy, sunrise: nil,
+                                 sunset: i == 0 ? sunset : nil)
             return DayRow(date: date, nSources: 6, consensus: point,
                           spread: DaySpread(tempMinC: nil, tempMaxC: nil, precipMm: nil, precipAgreementPct: nil), bySource: [:])
         }
@@ -412,5 +414,92 @@ struct OutlookTests {
         #expect(history.count == 4) // -9,5 h kam zu früh nach -10 h
         #expect(ForecastDigest.baseline(in: history, now: t) == d(-4))
         #expect(ForecastDigest.baseline(in: [d(-20), d(-1)], now: t) == nil)
+    }
+}
+
+/// Termine, Wochenende, goldene Stunde und was die Person antippt (Personal.swift).
+struct PersonalTests {
+    static let start = InsightTests.start
+
+    @Test func outdoorHeuristic() {
+        #expect(CalendarEvent.isOutdoor(title: "Hundeschule", location: nil))
+        #expect(CalendarEvent.isOutdoor(title: "Treffen", location: "Stadtpark Uelzen"))
+        #expect(!CalendarEvent.isOutdoor(title: "Treffen", location: "https://zoom.us/j/1"))
+        #expect(!CalendarEvent.isOutdoor(title: "Teams-Call Projekt", location: "Büro"))
+        #expect(!CalendarEvent.isOutdoor(title: "Zahnarzt", location: nil))
+    }
+
+    @Test func rainAtAnOutdoorEvent() {
+        var precip = Array(repeating: 0.0, count: 24)
+        precip[2] = 0.8 // 15 Uhr MEZ
+        let forecast = InsightTests.forecast(temps: Array(repeating: 8, count: 24), precip: precip)
+        let events = [
+            CalendarEvent(start: Self.start.addingTimeInterval(2 * 3600), end: Self.start.addingTimeInterval(3 * 3600),
+                          title: "Hundeschule", location: "Platz am Wald"),
+            CalendarEvent(start: Self.start.addingTimeInterval(2 * 3600), end: Self.start.addingTimeInterval(3 * 3600),
+                          title: "Zoom mit Team", location: "https://zoom.us/j/1"),
+        ]
+        let insights = Insight.rank(forecast, at: Self.start, events: events)
+        let event = insights.first
+        #expect(event?.kind == .event)
+        #expect(event?.title == "Regen zu „Hundeschule“")
+        #expect(event?.detail == "15:00 · 0,8 mm · 8°")
+        #expect(event?.short == "Termin: Regen")
+        #expect(event?.shortDetail == "15:00")
+        // Jev sieht den Termin, aber nie seinen Namen.
+        let request = DecisionRequest.make(forecast, placeName: "Uelzen", at: Self.start, events: events)
+        #expect(request.options["event"] == "Termin draußen 15:00: Regen, 0,8 mm · 8°")
+        #expect(!String(decoding: (try? JSONEncoder().encode(request)) ?? Data(), as: UTF8.self).contains("Hundeschule"))
+        // Trockener Termin: kein Hinweis.
+        #expect(Insight.rank(InsightTests.forecast(temps: Array(repeating: 8, count: 24)), at: Self.start, events: events)
+            .contains { $0.kind == .event } == false)
+    }
+
+    @Test func weekendOutlook() {
+        let thursday = Self.start.addingTimeInterval(3 * 86_400) // Do 13 Uhr
+        let forecast = InsightTests.forecast(temps: Array(repeating: 8, count: 24), days: Array(repeating: (2, 8), count: 7),
+                                             dayPrecip: [0, 0, 0, 0, 0, 3, 0])
+        let weekend = Insight.rank(forecast, at: thursday).first { $0.kind == .weekend }
+        #expect(weekend?.title == "Wochenende: Sa Regen, So Bewölkt")
+        #expect(weekend?.detail == "Sa 2° bis 8° · So 2° bis 8° · draußen eher am Sonntag")
+        #expect(weekend?.short == "WE: eher So")
+        #expect(weekend?.score == 0.28)
+        // Montag: noch kein Wochenende.
+        #expect(Insight.rank(forecast, at: Self.start).contains { $0.kind == .weekend } == false)
+    }
+
+    @Test func goldenHour() {
+        let sunset = Self.start.addingTimeInterval(3.5 * 3600) // 16:30 MEZ
+        let clear = InsightTests.forecast(temps: Array(repeating: 8, count: 24), clouds: 20, sunset: sunset)
+        let golden = Insight.rank(clear, at: Self.start).first { $0.kind == .golden }
+        #expect(golden?.title == "Goldene Stunde ab 15:30")
+        #expect(golden?.shortDetail == "15:30–16:30")
+        let cloudy = InsightTests.forecast(temps: Array(repeating: 8, count: 24), clouds: 80, sunset: sunset)
+        #expect(Insight.rank(cloudy, at: Self.start).contains { $0.kind == .golden } == false)
+    }
+
+    @Test func habitsFadeAndSteer() throws {
+        var stats = UsageStats()
+        for _ in 0..<3 { stats.record(mode: "hours", kind: "walk", section: "sources", at: Self.start) }
+        #expect(stats.favoriteKinds == [.walk])
+        #expect(stats.favoriteMode == .hours)
+        #expect(stats.favoriteSections == [.sources])
+        #expect(stats.summary == "Öffnet oft: Stundenverlauf; achtet oft auf: Gassi-Fenster; schaut oft: Quellenvergleich")
+
+        // Ruhiger Tag: die Lieblingsansicht statt der Übersicht, die Lieblingskarte nach oben.
+        let calm = InsightTests.forecast(temps: Array(repeating: 8, count: 24))
+        let insights = Insight.rank(calm, at: Self.start, habits: stats)
+        #expect(WidgetMode.rules(insights, at: Self.start) == .calm)
+        #expect(WidgetMode.rules(insights, at: Self.start, habits: stats) == .hours)
+        #expect(PlaceSection.order(for: insights, at: Self.start, habits: stats).prefix(3) == [.alerts, .focus, .sources])
+
+        // Lieblingshinweis bekommt etwas Gewicht dazu.
+        let walk = Insight.rank(try InsightTests.fixture(), at: Self.start, habits: stats).first { $0.kind == .walk }
+        #expect(walk?.score == 0.42 + UsageStats.boost)
+
+        // Nach neun Wochen (drei Halbwertszeiten) ist die Vorliebe verblasst.
+        stats.record(at: Self.start.addingTimeInterval(63 * 86_400))
+        #expect(stats.favoriteKinds.isEmpty)
+        #expect(stats.summary == nil)
     }
 }
