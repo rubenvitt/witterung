@@ -16,6 +16,8 @@ final class AppModel {
     private(set) var refreshTick = 0
     /// Reihenfolge der Hinweise laut Jev (Decision.swift), je Ort.
     private(set) var decisions: [PlaceRef: JevDecision] = [:]
+    /// Ältere Vorhersage zum Vergleich („Regen jetzt früher“), je Ort.
+    private(set) var baselines: [PlaceRef: ForecastDigest] = [:]
     private(set) var serverURL = SharedStore.serverURL
     private(set) var signedIn = !API.needsAuth(SharedStore.serverURL) || TokenStore.token != nil
     var message: String?
@@ -27,6 +29,7 @@ final class AppModel {
         for ref in [PlaceRef.current] + places.map({ .saved($0.id) }) {
             if let cached = ForecastCache.load(ref) { forecasts[ref] = cached }
             if let cached = DecisionCache.load(ref) { decisions[ref] = cached }
+            if let baseline = DigestStore.baseline(ref, now: .now) { baselines[ref] = baseline }
         }
         selection = pages.first
     }
@@ -103,7 +106,10 @@ final class AppModel {
             forecasts[ref] = forecast
             failures[ref] = nil
             ForecastCache.store(data, for: ref)
-            decisions[ref] = await JevClient.decide(forecast, ref: ref, placeName: title(ref), at: .now, api: api)
+            DigestStore.record(forecast, for: ref)
+            baselines[ref] = DigestStore.baseline(ref, now: .now)
+            decisions[ref] = await JevClient.decide(forecast, ref: ref, placeName: title(ref), at: .now,
+                                                    baseline: baselines[ref], api: api)
             if manual {
                 refreshTick += 1
                 WidgetCenter.shared.reloadAllTimelines()

@@ -186,7 +186,7 @@ private struct RectangularView: View {
                 Image(systemName: s.condition.symbol(isDay: s.isDay))
                 Text("\(Fmt.temp(s.temp)) \(s.placeName)").font(.headline).lineLimit(1)
             }
-            Text(s.rainHint).lineLimit(1)
+            Text(s.shortRainHint).lineLimit(1)
             MinMax(s: s)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -196,7 +196,7 @@ private struct RectangularView: View {
 private struct InlineView: View {
     let s: WeatherSnapshot
     var body: some View {
-        Label("\(Fmt.temp(s.temp)) · \(s.rainHint)", systemImage: s.condition.symbol(isDay: s.isDay))
+        Label("\(Fmt.temp(s.temp)) · \(s.shortRainHint)", systemImage: s.condition.symbol(isDay: s.isDay))
     }
 }
 

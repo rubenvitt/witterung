@@ -77,23 +77,224 @@ struct FocusWidgetView: View {
 
     var body: some View {
         let focus = s.focus
+        let night = s.mode == .tonight ? s.night : nil
         switch family {
         #if os(watchOS)
         case .accessoryCorner:
-            Image(systemName: focus.symbol)
+            Image(systemName: night != nil ? "moon.stars.fill" : focus.symbol)
                 .font(.title3)
-                .widgetLabel(focus.title)
+                .widgetLabel(night.map { "Nacht \(Fmt.temp($0.low))" } ?? focus.short)
         #else
-        case .systemSmall: FocusSmall(s: s)
-        case .systemMedium: FocusMedium(s: s)
-        case .systemLarge, .systemExtraLarge: FocusLarge(s: s)
+        case .systemSmall, .systemMedium, .systemLarge, .systemExtraLarge:
+            FocusSystemView(s: s, family: family)
         #endif
         case .accessoryRectangular: FocusRectangular(s: s)
-        case .accessoryInline: Label(focus.title, systemImage: focus.symbol)
+        case .accessoryInline:
+            if let night {
+                Label("Nacht \(Fmt.temp(night.low)) · \(night.wetFrom == nil ? "trocken" : "nass")", systemImage: "moon.stars.fill")
+            } else {
+                Label(focus.short, systemImage: focus.symbol)
+            }
         default: FocusCircular(s: s)
         }
     }
 }
+
+#if !os(watchOS)
+/// Home-Bildschirm: die Ansicht, die Jev (oder die Regeln) gewählt haben.
+private struct FocusSystemView: View {
+    let s: WeatherSnapshot
+    let family: WidgetFamily
+
+    var body: some View {
+        switch s.mode {
+        case .hint:
+            switch family {
+            case .systemSmall: FocusSmall(s: s)
+            case .systemMedium: FocusMedium(s: s)
+            default: FocusLarge(s: s)
+            }
+        case .hours: FocusHours(s: s, family: family)
+        case .days: FocusDays(s: s, family: family)
+        case .tonight:
+            if let night = s.night {
+                FocusTonight(s: s, night: night, family: family)
+            } else {
+                FocusHours(s: s, family: family)
+            }
+        case .calm: WeatherWidgetView(snapshot: s, family: family)
+        }
+    }
+}
+
+/// Der wichtigste Hinweis als eine Zeile über einer anderen Ansicht.
+private struct FocusBanner: View {
+    let insight: Insight
+
+    var body: some View {
+        if insight.kind != .calm {
+            HStack(spacing: Spacing.xs) {
+                InsightSymbol(insight: insight).font(.caption)
+                Text(insight.title).font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
+            }
+        }
+    }
+}
+
+private struct FocusHeader: View {
+    let s: WeatherSnapshot
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+            PlaceTitle(s: s)
+            Text(Fmt.temp(s.temp)).font(.subheadline.weight(.semibold))
+            Spacer(minLength: Spacing.xs)
+        }
+    }
+}
+
+private struct FocusHours: View {
+    let s: WeatherSnapshot
+    let family: WidgetFamily
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            FocusHeader(s: s)
+            FocusBanner(insight: s.focus)
+            switch family {
+            case .systemSmall:
+                ForEach(s.hours.prefix(4), id: \.self) { hour in
+                    HStack(spacing: Spacing.xs) {
+                        Text(Fmt.hour(hour.at)).font(.caption.weight(.medium)).frame(width: 42, alignment: .leading)
+                        Image(systemName: hour.symbol).symbolRenderingMode(.multicolor).font(.caption).frame(width: 20)
+                        Spacer(minLength: 0)
+                        Text(Fmt.temp(hour.temp)).font(.caption.weight(.semibold))
+                    }
+                    .frame(maxHeight: .infinity)
+                }
+            case .systemMedium:
+                HourGraph(hours: Array(s.hours.prefix(12)), labelEvery: 2, showsSymbols: true)
+            default:
+                HourGraph(hours: Array(s.hours.prefix(12)), labelEvery: 2, showsSymbols: true)
+                Divider().overlay(.white.opacity(0.4))
+                HourGraph(hours: Array(s.hours.dropFirst(12).prefix(12)), labelEvery: 2, showsSymbols: true)
+                ReasonLine(text: s.modeReason)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .foregroundStyle(.white)
+    }
+}
+
+private struct FocusDays: View {
+    let s: WeatherSnapshot
+    let family: WidgetFamily
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            FocusHeader(s: s)
+            FocusBanner(insight: s.focus)
+            switch family {
+            case .systemSmall:
+                ForEach(s.days.prefix(3), id: \.self) { day in
+                    HStack(spacing: Spacing.xs) {
+                        Text(Fmt.weekday(day.date, now: s.date)).font(.caption.weight(.medium)).lineLimit(1)
+                            .minimumScaleFactor(0.8).frame(width: 40, alignment: .leading)
+                        Image(systemName: day.symbol).symbolRenderingMode(.multicolor).font(.caption).frame(width: 20)
+                        Spacer(minLength: 0)
+                        Text(Fmt.temp(day.max)).font(.caption.weight(.semibold))
+                        Text(Fmt.temp(day.min)).font(.caption).opacity(0.7)
+                    }
+                    .frame(maxHeight: .infinity)
+                }
+            case .systemMedium:
+                Spacer(minLength: 0)
+                DayColumns(days: Array(s.days.prefix(5)), now: s.date)
+                Spacer(minLength: 0)
+            default:
+                DayRangeRows(days: Array(s.days.prefix(7)), now: s.date, showsPrecip: true)
+                    .frame(maxHeight: .infinity)
+                ReasonLine(text: s.modeReason)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .foregroundStyle(.white)
+    }
+}
+
+/// Heute Nacht und morgen früh.
+private struct FocusTonight: View {
+    let s: WeatherSnapshot
+    let night: NightOutlook
+    let family: WidgetFamily
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            if family == .systemSmall {
+                NightColumn(s: s, night: night)
+            } else {
+                HStack(alignment: .top, spacing: Spacing.m) {
+                    NightColumn(s: s, night: night)
+                    Spacer(minLength: 0)
+                    MorningColumn(night: night)
+                }
+                if family != .systemMedium {
+                    HourGraph(hours: Array(night.hours.prefix(12)), labelEvery: 2, showsSymbols: true)
+                        .frame(maxHeight: 120)
+                    if let outfit = s.outfit {
+                        Label(outfit, systemImage: "tshirt.fill").font(.caption).lineLimit(2).opacity(0.85)
+                    }
+                    Spacer(minLength: 0)
+                    FocusBanner(insight: s.focus)
+                    ReasonLine(text: s.modeReason)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .foregroundStyle(.white)
+    }
+}
+
+private struct NightColumn: View {
+    let s: WeatherSnapshot
+    let night: NightOutlook
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            Label("Heute Nacht", systemImage: "moon.stars.fill").font(.caption.weight(.semibold)).opacity(0.85)
+            Text(Fmt.temp(night.low)).font(.system(size: 38, weight: .light)).minimumScaleFactor(0.7)
+            Text("gegen \(Fmt.hour(night.lowAt))" + (night.frost ? " · Frost" : "")).font(.caption)
+            Text(night.wetFrom.map { "nass ab \(Fmt.hour($0))" } ?? "trocken").font(.caption.weight(.semibold))
+                .foregroundStyle(night.wetFrom == nil ? Color.white : Color.cyan)
+            Spacer(minLength: 0)
+            Text(s.placeName).font(.caption2.weight(.semibold)).lineLimit(1).opacity(0.75)
+        }
+    }
+}
+
+private struct MorningColumn: View {
+    let night: NightOutlook
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: Spacing.xxs) {
+            Text("Morgen früh").font(.caption.weight(.semibold)).opacity(0.85)
+            HStack(spacing: Spacing.xs) {
+                if let symbol = night.morningSymbol { Image(systemName: symbol).symbolRenderingMode(.multicolor) }
+                Text(night.morningTemp.map { "7 Uhr \(Fmt.temp($0))" } ?? "–").font(.subheadline.weight(.semibold))
+            }
+            if let sunrise = night.sunrise {
+                Label(Fmt.time(sunrise), systemImage: "sunrise.fill").font(.caption)
+            }
+            if let day = night.tomorrow {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: day.symbol).symbolRenderingMode(.multicolor)
+                    Text("\(Fmt.temp(day.max)) / \(Fmt.temp(day.min))").font(.caption.weight(.semibold))
+                }
+            }
+        }
+    }
+}
+#endif
 
 /// Symbol des Hinweises in seiner Farbe; ruhiges Wetter in den Farben der Wetterlage.
 struct InsightSymbol: View {
@@ -248,20 +449,33 @@ struct FocusVisual: View {
     }
 }
 
+/// Sperrbildschirm und Watch: nur Kurztexte, damit nichts mit „…“ endet.
 private struct FocusRectangular: View {
     let s: WeatherSnapshot
 
     var body: some View {
         let f = s.focus
         VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: f.symbol)
-                Text(f.title).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+            if s.mode == .tonight, let night = s.night {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: "moon.stars.fill")
+                    Text("Nacht \(Fmt.temp(night.low))").font(.headline)
+                }
+                .widgetAccentable()
+                Text(night.wetFrom.map { "nass ab \(Fmt.hour($0))" } ?? "trocken")
+                Text(night.morningTemp.map { "7 Uhr \(Fmt.temp($0))" } ?? s.placeName).opacity(0.8)
+            } else {
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: f.symbol)
+                    Text(f.short).font(.headline)
+                }
+                .widgetAccentable()
+                Text(f.shortDetail)
+                Text("\(Fmt.temp(s.temp)) · \(f.shortReason)").opacity(0.8)
             }
-            .widgetAccentable()
-            Text(f.detail).lineLimit(1).minimumScaleFactor(0.8)
-            Text("\(Fmt.temp(s.temp)) · \(f.reasonLine)").lineLimit(1).minimumScaleFactor(0.8).opacity(0.8)
         }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -1,6 +1,10 @@
 //! Push via ntfy: new DWD warning (from `moderate`) and rain starting within
 //! 30 minutes (radar nowcast), for places with `notify`. Settings live in the
 //! database (`settings.notifications`), edited through the API.
+//!
+//! Before anything but a red or violet warning goes out, Jev decides whether it
+//! is worth the interruption (`decide::notify_probability`). Without Jev, or when
+//! it fails, the message goes out as before.
 
 use axum::extract::State;
 use axum::Json;
@@ -16,6 +20,8 @@ use crate::poller::{ALERTS_KEY, NOWCAST_KEY};
 use crate::sources::dwd::{Alert, Nowcast};
 
 const SETTINGS_KEY: &str = "notifications";
+/// Below this Jev probability a push is held back (TypeSafe suggests ≈ 0,3 for „no“).
+const NOTIFY_BELOW: f64 = 0.3;
 /// Rain counts from this intensity (mm/h).
 const RAIN_MM_H: f64 = 0.2;
 const RAIN_LEAD: SignedDuration = SignedDuration::from_mins(30);
@@ -114,6 +120,7 @@ pub async fn test(State(app): State<App>) -> AppResult<Json<Value>> {
             message: "Testnachricht: Benachrichtigungen kommen an.".into(),
             priority: 3,
             tags: vec!["white_check_mark".into()],
+            critical: true,
         },
     )
     .await
@@ -127,6 +134,8 @@ pub struct Message {
     pub message: String,
     pub priority: u8,
     pub tags: Vec<String>,
+    /// Safety (red or violet warning): always sent, Jev is not asked.
+    pub critical: bool,
 }
 
 async fn send(app: &App, s: &Settings, m: Message) -> Result<(), String> {
@@ -177,6 +186,7 @@ pub fn due_messages(
                 message: format!("{}{until}\n\n{}", a.event, a.description),
                 priority: if a.severity_rank() >= 3 { 5 } else { 4 },
                 tags: vec!["warning".into()],
+                critical: a.severity_rank() >= 3,
             },
         ));
     }
@@ -218,11 +228,23 @@ pub fn due_messages(
                     ),
                     priority: 3,
                     tags: vec!["umbrella".into()],
+                    critical: false,
                 },
             ));
         }
     }
     out
+}
+
+/// What Jev sees when deciding about a push.
+pub fn push_state(place: &str, msg: &Message, now: Timestamp) -> Value {
+    let local = now.to_zoned(crate::sources::berlin());
+    json!({
+        "place": place,
+        "localTime": local.strftime("%A %H:%M").to_string(),
+        "title": msg.title,
+        "message": msg.message,
+    })
 }
 
 /// Runs after each poll round.
@@ -259,6 +281,16 @@ pub async fn evaluate(app: &App, now: Timestamp) -> AppResult<()> {
                 .await?;
             if !fresh {
                 continue;
+            }
+            // Asked once per message: a „no“ stays marked as handled.
+            if !msg.critical {
+                let state = push_state(&place.name, &msg, now);
+                if let Some(p) = crate::decide::notify_probability(app, state).await {
+                    if p < NOTIFY_BELOW {
+                        tracing::info!(place = %place.name, title = %msg.title, p, "push held back by jev");
+                        continue;
+                    }
+                }
             }
             if let Err(e) = send(app, &s, msg).await {
                 tracing::warn!(error = %e, "push failed, retry next round");

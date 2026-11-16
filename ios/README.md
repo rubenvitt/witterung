@@ -55,12 +55,13 @@ starten (der Versuch zählt mit). Für eine neue Version `MARKETING_VERSION` erh
 
 ### Tests
 
-41 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
+49 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
 (Uelzen im November, Warnungen, Regen in 25 min, eine Quelle mit Kontingentfehler),
 PKCE-Testvektor aus RFC 7636 Anhang B, Nowcast-Sätze, Regenhinweis und stündliche
 Widget-Timeline, WMS-BBOX-Rechnung, deutsche Zahlen- und Zeitformate, dazu
 `InsightTests` für jede Regel von „Im Blick“, die Gewichte gegeneinander und die
-Kartenreihenfolge, `DecisionTests` für Jevs Umordnung (Schwelle, Leitplanke, stabile Anfrage).
+Kartenreihenfolge, `DecisionTests` für Jevs Entscheidungen (Schwelle, Leitplanken, Ansicht, Fenster, Karten, stabile
+Anfrage) und `OutlookTests` für Kurztexte, Nacht, Kernsatz, Anzieh-Tipp und „Vorhersage geändert“.
 
 Das Testbundle läuft ohne Host-App. Hängt `xcodebuild test` mit „The test runner hung
 before establishing connection“ (auf dem Entwicklungsrechner am 09.11.2026 so, der
@@ -168,7 +169,7 @@ eigene Komplikation an.
 | Art | Größen (iPhone) | Watch | Inhalt |
 |---|---|---|---|
 | Wetter | klein, mittel, groß, rund, rechteckig, einzeilig | rund, rechteckig, einzeilig, Ecke | Temperatur, Lage, Regenhinweis, Stunden, 5 Tage |
-| Im Blick | klein, mittel, groß, rund, rechteckig, einzeilig | rund, rechteckig, einzeilig, Ecke | das Wichtigste gerade, mit Grund |
+| Im Blick | klein, mittel, groß, rund, rechteckig, einzeilig | rund, rechteckig, einzeilig, Ecke | was gerade zählt: Hinweis, Stunden, Tage, Heute Nacht oder Ruhe – mit Grund |
 | Stunden | klein, mittel, groß, rechteckig | rechteckig | Temperaturkurve mit Regenbalken, 12 bzw. 24 h |
 | Tage | klein, mittel, groß, rechteckig | rechteckig | 4–10 Tage, groß mit Balken und Regenmenge |
 
@@ -188,6 +189,7 @@ der Hinweis mit dem höchsten Gewicht steht vorn.
 | Hitze | Höchstwert ≥ 25°/30° heute oder morgen | 0,3/0,6 |
 | Frost | Tiefstwert < 0,5° in 18 h | 0,45, „möglich“ 0,35, ≤ −5° 0,55 |
 | Gassi-Fenster | regnet es in 12 h: erste trockene Lücke ≥ 2 h zwischen 6 und 22 Uhr | 0,42 |
+| Vorhersage geändert | Regen ≥ 2 h früher/später, neu oder abgesagt; morgen ≥ 3° anders | 0,3–0,4 |
 | Umschwung | morgen ≥ 5° wärmer/kälter | 0,38–0,5 |
 | Quellen uneinig | Temperatur-Spannbreite ≥ 5° oder 30–70 % Regen-Einigkeit | 0,25 |
 | Ruhiges Wetter | nichts davon | – |
@@ -195,20 +197,41 @@ der Hinweis mit dem höchsten Gewicht steht vorn.
 Was eine amtliche Warnung schon abdeckt (Sturm, Frost, Glätte, Gewitter …), bekommt keinen
 eigenen Hinweis.
 
-**Jev entscheidet die Reihenfolge.** Sind es mindestens zwei Hinweise, fragt App bzw. Widget
-über den Server [Jev](https://docs.typesafe.ai), das Entscheidungsmodell von TypeSafe
-(`Shared/Decision.swift`, `Shared/JevClient.swift`, Server `POST /api/v1/decide`). Jev bekommt
-die Lage (Temperatur, Radar-Satz, Warnungen, 12 Stunden) und die Hinweise als Optionen und gibt
-jedem eine Wahrscheinlichkeit. Übernommen wird das nur bei Konfidenz ≥ 0,5 und wenn Jev über
-genau die aktuellen Hinweise entschieden hat; rote und violette Warnungen bleiben immer vorn.
-Der Grund zeigt dann „· Jev 84 %“. Ohne Schlüssel auf dem Server, offline oder bei Fehlern
-gilt die Reihenfolge der Regeln (bzw. die letzte passende Jev-Antwort aus dem Cache).
-Die Gewichte unten sind also die Rückfallebene. Neben dem Hinweis zeigt das Widget, was ihn erklärt: Radarbalken bei Regen,
+**Jev entscheidet mit.** Die Regeln finden die Fakten, [Jev](https://docs.typesafe.ai), das
+Entscheidungsmodell von TypeSafe, trifft über den Server die Abwägungen (`Shared/Decision.swift`,
+`Shared/JevClient.swift`, Server `POST /api/v1/decide`, Details in `docs/api.md`): welcher Hinweis
+vorn steht, welche Ansicht das Widget zeigt, wie dringend die Lage ist (Smart Stack, Neuladen nach
+15/30/60 min), welche Karte auf der Ortsseite oben steht und welches Gassi-Fenster am besten ist.
+Jev bekommt dafür die Lage (Temperatur, Radar-Satz, Warnungen, Nacht, 12 Stunden), die Hinweise
+und die trockenen Fenster als Optionen. Übernommen wird nur bei Konfidenz ≥ 0,5; rote und violette
+Warnungen bleiben immer vorn. Der Grund zeigt dann „· Jev 84 %“. Ohne Schlüssel auf dem Server,
+offline oder bei Fehlern gelten die Regeln (bzw. die letzte Jev-Antwort aus dem Cache). Die
+Gewichte unten sind also die Rückfallebene. Auch Push-Nachrichten prüft der Server vorher mit Jev.
+
+**Ansichten von „Im Blick“.** `hint`: der Hinweis groß mit Radar, Stunden oder Tagen; `hours`: der
+Stundenverlauf; `days`: die Tage; `tonight`: Heute Nacht (Tiefstwert, Nässe, Frost) und morgen früh
+(7 Uhr, Sonnenaufgang, Tag), groß mit Nachtverlauf und Anzieh-Tipp; `calm`: die ruhige Übersicht.
+Außer bei `calm` steht der wichtigste Hinweis als Zeile darüber. Ohne Jev: Wichtiges groß; ist
+nichts los, abends die Nacht, tagsüber die Übersicht.
+
+**Sperrbildschirm und Watch** zeigen nur Kurztexte (`Insight.short`, `shortDetail`, `source`, je
+höchstens etwa 14–18 Zeichen: „Regen 13:25“ · „bis 15:00“ · „8° · Radar“), damit nichts mit „…“
+endet; ein Test prüft die Längen für alle Regeln.
+
+**Vorhersage geändert.** App und Widget merken sich je gespeichertem Ort stündlich eine
+Kurzfassung der Vorhersage (`ForecastDigest`, höchstens 24). Verglichen wird mit dem jüngsten
+Stand, der 3–18 Stunden alt ist: Regen ≥ 2 h früher oder später, neu angesagt oder abgesagt, sonst
+ein um ≥ 3° anderer Höchstwert für morgen. „Mein Standort“ bleibt außen vor. Neben dem Hinweis zeigt das Widget, was ihn erklärt: Radarbalken bei Regen,
 die Tage bei Hitze und Umschwung, sonst den Stundenverlauf. Die Timeline ist dichter (in den
 ersten zwei Stunden alle 15 min), das Gewicht geht als `TimelineEntryRelevance` an den Smart
 Stack, und steht Warnung oder Radar-Regen vorn, lädt das Widget nach 15 statt 30 min neu.
 
-**Dynamische Ortsseite.** Dieselben Hinweise ordnen die Karten (`PlaceSection.order`):
+**Dynamische Ortsseite.** Unter der Temperatur steht ein Kernsatz aus den Hinweisen
+(„Sturmböen, ab 15:00 bis Di 04:00. Außerdem: Regen 13:25, Gassi 17–22.“). „Im Blick“ zeigt
+dazu einen Anzieh-Tipp für den nächsten Gang nach draußen (Jacke nach gefühlter Temperatur,
+Schirm oder Regenjacke bei Wind, rutschfeste Schuhe bei Glätte, Leuchthalsband im Dunkeln, Wasser
+für den Hund bei Hitze). Die Karte „Heute Nacht“ steht abends und nachts gleich nach „Im Blick“.
+Ohne Jev ordnen die Hinweise die Karten (`PlaceSection.order`):
 Warnungen immer oben, dann bei Regen das Radar vor allem anderen, bei Umschwung oder Hitze die
 10 Tage vor den Stunden, bei Sturm die Messwerte (Wind) nach oben, bei uneinigen Quellen der
 Quellenvergleich. Die Karte „Im Blick“ zeigt bis zu drei Hinweise mit Grund (ohne Warnungen und
