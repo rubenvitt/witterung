@@ -143,7 +143,7 @@ private struct FocusSmall: View {
             Text(f.title).font(.headline).lineLimit(3).minimumScaleFactor(0.7)
             Text(f.detail).font(.caption).opacity(0.85).lineLimit(2).minimumScaleFactor(0.85)
             Spacer(minLength: 0)
-            ReasonLine(text: f.reason)
+            ReasonLine(text: f.reasonLine)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.white)
@@ -172,7 +172,7 @@ private struct FocusMedium: View {
             Spacer(minLength: Spacing.xs)
             FocusVisual(s: s, insight: f).frame(height: 54)
             Spacer(minLength: Spacing.xs)
-            ReasonLine(text: f.reason)
+            ReasonLine(text: f.reasonLine)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.white)
@@ -199,7 +199,7 @@ private struct FocusLarge: View {
                 }
             }
             FocusVisual(s: s, insight: f).frame(height: 78)
-            ReasonLine(text: f.reason)
+            ReasonLine(text: f.reasonLine)
             Divider().overlay(.white.opacity(0.4))
             if others.isEmpty {
                 DayColumns(days: Array(s.days.prefix(5)), now: s.date)
@@ -260,7 +260,7 @@ private struct FocusRectangular: View {
             }
             .widgetAccentable()
             Text(f.detail).lineLimit(1).minimumScaleFactor(0.8)
-            Text("\(Fmt.temp(s.temp)) · \(f.reason)").lineLimit(1).minimumScaleFactor(0.8).opacity(0.8)
+            Text("\(Fmt.temp(s.temp)) · \(f.reasonLine)").lineLimit(1).minimumScaleFactor(0.8).opacity(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

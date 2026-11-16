@@ -158,7 +158,8 @@ struct Provider: AppIntentTimelineProvider {
         // Galerie: schnell aus dem Cache, nur ohne Cache übers Netz.
         var forecast = ForecastCache.load(place.ref)
         if forecast == nil { forecast = try? await fetch(place.ref) }
-        return entry(forecast.flatMap { WeatherSnapshot.make($0, at: .now, placeName: name(place, $0)) },
+        let decision = style == .focus ? DecisionCache.load(place.ref) : nil
+        return entry(forecast.flatMap { WeatherSnapshot.make($0, at: .now, placeName: name(place, $0), decision: decision) },
                      at: .now, place: place, context: context)
     }
 
@@ -168,8 +169,13 @@ struct Provider: AppIntentTimelineProvider {
         // Erst frisch laden; ohne Netz trägt der Cache (stündliche Einträge bleiben richtig).
         var forecast = try? await fetch(place.ref)
         if forecast == nil { forecast = ForecastCache.load(place.ref) }
+        // „Im Blick“: Jev ordnet die Hinweise; ohne Antwort entscheiden die Regeln.
+        var decision: JevDecision?
+        if style == .focus, let forecast {
+            decision = await JevClient.decide(forecast, ref: place.ref, placeName: name(place, forecast), at: now)
+        }
         var entries = forecast.map { f in
-            WeatherSnapshot.timeline(f, now: now, dense: style.isDense, placeName: name(place, f)).map {
+            WeatherSnapshot.timeline(f, now: now, dense: style.isDense, placeName: name(place, f), decision: decision).map {
                 entry($0, at: $0.date, place: place, context: context)
             }
         } ?? []

@@ -22,7 +22,7 @@ struct PlaceView: View {
                 if let forecast {
                     // Was gerade zählt, bestimmt die Reihenfolge der Karten (Insight.swift).
                     let now = Date.now
-                    let insights = Insight.rank(forecast, at: now)
+                    let insights = Insight.rank(forecast, at: now).ordered(by: model.decisions[ref])
                     HeaderView(title: model.title(ref), isCurrent: ref == .current, forecast: forecast)
                     FreshnessBadge(forecast: forecast, failure: model.failures[ref], loading: model.loading.contains(ref))
                     ForEach(PlaceSection.order(for: insights), id: \.self) { section in
@@ -39,7 +39,7 @@ struct PlaceView: View {
             .padding(.bottom, Spacing.xl)
         }
         .scrollIndicators(.hidden)
-        .animation(.snappy, value: forecast.map { PlaceSection.order(for: Insight.rank($0, at: .now)) })
+        .animation(.snappy, value: forecast.map { PlaceSection.order(for: Insight.rank($0, at: .now).ordered(by: model.decisions[ref])) })
         #if DEBUG
         .task(id: forecast == nil) {
             // Screenshots: `-scrollTo daily` springt zu einem Abschnitt.

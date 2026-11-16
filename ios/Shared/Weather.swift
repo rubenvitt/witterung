@@ -246,8 +246,10 @@ struct WeatherSnapshot: Sendable {
 
     /// Einträge ab `now`: erst jetzt, dann zu jeder vollen Stunde, solange es Daten gibt.
     /// `dense`: in den ersten zwei Stunden (Radar) alle 15 Minuten, für das Fokus-Widget.
-    static func timeline(_ forecast: Forecast, now: Date, count: Int = 8, dense: Bool = false, placeName: String? = nil) -> [WeatherSnapshot] {
-        dates(now: now, count: count, dense: dense).compactMap { make(forecast, at: $0, placeName: placeName) }
+    /// `decision`: Reihenfolge von Jev; gilt für jeden Eintrag, dessen Hinweise dieselben sind.
+    static func timeline(_ forecast: Forecast, now: Date, count: Int = 8, dense: Bool = false, placeName: String? = nil,
+                         decision: JevDecision? = nil) -> [WeatherSnapshot] {
+        dates(now: now, count: count, dense: dense).compactMap { make(forecast, at: $0, placeName: placeName, decision: decision) }
     }
 
     static func dates(now: Date, count: Int = 8, dense: Bool = false) -> [Date] {
@@ -261,7 +263,7 @@ struct WeatherSnapshot: Sendable {
         return [now] + quarters.filter { $0 < radarEnd } + hourly.filter { $0 >= radarEnd }
     }
 
-    static func make(_ forecast: Forecast, at date: Date, placeName: String? = nil) -> WeatherSnapshot? {
+    static func make(_ forecast: Forecast, at date: Date, placeName: String? = nil, decision: JevDecision? = nil) -> WeatherSnapshot? {
         // Ohne Stundenwert für `date` ist die Vorhersage abgelaufen: lieber „keine Daten“ als alte Werte.
         guard let row = forecast.hour(at: date)?.consensus else { return nil }
         // Beobachtung gilt, solange sie frisch ist; danach die Prognose der Stunde.
@@ -288,7 +290,7 @@ struct WeatherSnapshot: Sendable {
             },
             generatedAt: forecast.generatedAt,
             hasWeatherKit: forecast.hasWeatherKit,
-            insights: Insight.rank(forecast, at: date),
+            insights: Insight.rank(forecast, at: date).ordered(by: decision),
             radar: (forecast.nowcast?.points ?? []).filter { $0.at.addingTimeInterval(300) > date }.map(\.precipMmH)
         )
     }

@@ -63,6 +63,7 @@ Per Env nur der Bootstrap; Orte und alles Weitere werden in der App eingestellt.
 | `WITTERUNG_DEV_AUTH` | nur lokal: Anmeldung ohne Pocket ID über localhost |
 | `WITTERUNG_WEATHERKIT_KEY_FILE` (oder `_KEY`), `_KEY_ID`, `_TEAM_ID`, `_SERVICE_ID` | WeatherKit, alle vier oder keiner |
 | `WITTERUNG_PIRATE_WEATHER_KEY` (oder `_KEY_FILE`) | Pirate Weather |
+| `WITTERUNG_JEV_KEY` (oder `_KEY_FILE`), `_MODEL` | Jev (TypeSafe) ordnet die Hinweise von „Im Blick“, siehe [docs/api.md](docs/api.md#entscheidung-jev); Standardmodell `jev-latest` |
 
 Open-Meteo und Bright Sky laufen ohne Zugang. Für WeatherKit den `.p8`-Schlüssel nach
 `~/server/witterung/secrets/weatherkit.p8` legen (lesbar für uid 10001), in der Compose-Datei

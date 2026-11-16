@@ -48,7 +48,7 @@ private struct InsightDetailRow: View {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(insight.title).font(isPrimary ? .title3.weight(.semibold) : .headline)
                 Text(insight.detail).font(.subheadline).foregroundStyle(.white.opacity(0.85))
-                Label(insight.reason, systemImage: "info.circle")
+                Label(insight.reasonLine, systemImage: insight.jevProbability == nil ? "info.circle" : "sparkles")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.65))
                     .padding(.top, Spacing.xxs)

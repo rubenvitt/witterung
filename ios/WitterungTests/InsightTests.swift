@@ -209,3 +209,59 @@ struct InsightTests {
         #expect(insights.first?.detail == "Trocken ab 13:15")
     }
 }
+
+/// Jev ordnet die Hinweise der Regeln (Decision.swift).
+struct DecisionTests {
+    static func decision(_ p: [String: Double], confidence: Double = 0.7) -> JevDecision {
+        JevDecision(choice: p.max { $0.value < $1.value }!.key, probabilities: p, confidence: confidence, model: "jev-1.13.0")
+    }
+
+    @Test func jevReordersWhenConfident() throws {
+        let insights = Insight.rank(try InsightTests.fixture(), at: InsightTests.start)
+        let ordered = insights.ordered(by: Self.decision(["alert": 0.1, "rainSoon": 0.2, "walk": 0.7]))
+        #expect(ordered.map(\.kind) == [.walk, .rainSoon, .alert])
+        #expect(ordered[0].jevProbability == 0.7)
+        #expect(ordered[0].reasonLine == "Längste trockene Lücke zwischen den Schauern · Jev 70 %")
+        #expect(ordered[1].jevProbability == nil)
+        #expect(ordered[1].reasonLine == ordered[1].reason)
+    }
+
+    @Test func rulesStayWhenUnsureOrDifferent() throws {
+        let insights = Insight.rank(try InsightTests.fixture(), at: InsightTests.start)
+        // Zu unsicher
+        #expect(insights.ordered(by: Self.decision(["alert": 0.3, "rainSoon": 0.3, "walk": 0.4], confidence: 0.3)) == insights)
+        // Jev kannte andere Hinweise (Lage hat sich geändert)
+        #expect(insights.ordered(by: Self.decision(["alert": 0.1, "walk": 0.9])) == insights)
+        #expect(insights.ordered(by: nil) == insights)
+    }
+
+    @Test func severeAlertIsPinned() {
+        let nowcast = NowcastTests.nowcast([0, 1, 1, 1, 1, 1])
+        let insights = Insight.rank(InsightTests.forecast(temps: Array(repeating: 8, count: 24),
+                                                          alerts: [InsightTests.alert("ORKANBÖEN", .severe)], nowcast: nowcast),
+                                    at: InsightTests.start)
+        #expect(insights.map(\.kind) == [.alert, .rainSoon])
+        let ordered = insights.ordered(by: Self.decision(["alert": 0.05, "rainSoon": 0.95]))
+        #expect(ordered.map(\.kind) == [.alert, .rainSoon])
+        #expect(ordered[0].jevProbability == nil)
+    }
+
+    @Test func requestIsCompactAndStableWithinAQuarter() throws {
+        let forecast = try InsightTests.fixture()
+        let request = try #require(DecisionRequest.make(forecast, placeName: "Uelzen", at: InsightTests.start))
+        #expect(Set(request.options.keys) == ["alert", "rainSoon", "walk"])
+        #expect(request.options["rainSoon"] == "Regen in 25 Minuten. ab 13:25, bis etwa 15:00. Grund: Regenradar des DWD, nächste 2 Stunden")
+        #expect(request.state.localTime == "Mo 13:00")
+        #expect(request.state.radar == "Regen in 25 Minuten")
+        #expect(request.state.nextHours.count == 12)
+        #expect(request.state.alerts.first?.event == "Sturmböen")
+        // 7 Minuten später: dieselbe Anfrage, der Server antwortet aus dem Cache.
+        let later = DecisionRequest.make(forecast, placeName: "Uelzen", at: InsightTests.start.addingTimeInterval(7 * 60))
+        #expect(later == request)
+        let json = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
+        #expect(json.contains("\"nextHours\""))
+        // Nichts zu entscheiden bei nur einem Hinweis.
+        let calm = InsightTests.forecast(temps: Array(repeating: 8, count: 24))
+        #expect(DecisionRequest.make(calm, placeName: "X", at: InsightTests.start) == nil)
+    }
+}

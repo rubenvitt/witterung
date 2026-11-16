@@ -20,6 +20,7 @@ struct Inner {
     db: Mutex<Connection>,
     oidc: Option<Arc<OidcClient>>,
     http: reqwest::Client,
+    decisions: crate::decide::DecisionCache,
 }
 
 /// A freshly created session; `id` goes into the cookie.
@@ -57,6 +58,7 @@ impl App {
                 db: Mutex::new(conn),
                 oidc,
                 http,
+                decisions: Default::default(),
             }),
         })
     }
@@ -71,6 +73,11 @@ impl App {
 
     pub fn http(&self) -> &reqwest::Client {
         &self.inner.http
+    }
+
+    /// Cached Jev answers (`decide.rs`).
+    pub fn decisions(&self) -> &crate::decide::DecisionCache {
+        &self.inner.decisions
     }
 
     /// Runs `f` with the database on the blocking pool.

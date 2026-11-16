@@ -60,6 +60,8 @@ pub struct Config {
     /// Source credentials (env or Docker secrets); a source without them is off.
     pub weatherkit: Option<WeatherKitConfig>,
     pub pirate_weather_key: Option<Secret>,
+    /// Jev decision model (TypeSafe); without a key `/api/v1/decide` answers 503.
+    pub jev: Option<crate::decide::JevConfig>,
     /// Directory with the web app (`index.html`, `assets/`).
     pub web_dir: PathBuf,
 }
@@ -200,6 +202,21 @@ impl Config {
             }
         };
         let pirate_weather_key = secret("WITTERUNG_PIRATE_WEATHER_KEY")?.map(Secret);
+        let jev = match secret("WITTERUNG_JEV_KEY")? {
+            None => None,
+            Some(key) => {
+                let url =
+                    get("WITTERUNG_JEV_URL").unwrap_or_else(|| crate::decide::DEFAULT_URL.into());
+                Some(crate::decide::JevConfig {
+                    key: Secret(key),
+                    url: Url::parse(&url).map_err(|_| {
+                        ConfigError(format!("WITTERUNG_JEV_URL ist keine URL: {url}"))
+                    })?,
+                    model: get("WITTERUNG_JEV_MODEL")
+                        .unwrap_or_else(|| crate::decide::DEFAULT_MODEL.into()),
+                })
+            }
+        };
 
         Ok(Self {
             bind,
@@ -211,6 +228,7 @@ impl Config {
             endpoints: Default::default(),
             weatherkit,
             pirate_weather_key,
+            jev,
             web_dir: PathBuf::from(get("WITTERUNG_WEB_DIR").unwrap_or_else(|| "../web".into())),
         })
     }
@@ -227,6 +245,7 @@ impl Config {
             endpoints: Default::default(),
             weatherkit: None,
             pirate_weather_key: None,
+            jev: None,
             web_dir: PathBuf::from("../web"),
         }
     }
@@ -328,6 +347,12 @@ mod tests {
         assert!(cfg(&[("WITTERUNG_PIRATE_WEATHER_KEY_FILE", "/gibt/es/nicht")]).is_err());
         let c = cfg(&[("WITTERUNG_PIRATE_WEATHER_KEY", "geheim")]).unwrap();
         assert!(!format!("{c:?}").contains("geheim"));
+        let c = cfg(&[("WITTERUNG_JEV_KEY", "jev-geheim")]).unwrap();
+        let jev = c.jev.as_ref().unwrap();
+        assert_eq!(jev.url.as_str(), crate::decide::DEFAULT_URL);
+        assert_eq!(jev.model, "jev-latest");
+        assert!(!format!("{c:?}").contains("jev-geheim"));
+        assert!(cfg(&[("WITTERUNG_JEV_KEY", "k"), ("WITTERUNG_JEV_URL", "kaputt")]).is_err());
         assert!(cfg(&[("WITTERUNG_BIND", "nope")]).is_err());
         assert!(cfg(&[("WITTERUNG_DEV_AUTH", "yes")]).is_err());
         assert!(cfg(&[("WITTERUNG_OIDC_ISSUER", "https://id.example.org")]).is_err());

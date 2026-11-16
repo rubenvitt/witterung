@@ -16,6 +16,12 @@ pub enum AppError {
     BadRequest(String),
     #[error("nicht gefunden")]
     NotFound,
+    /// A feature that is not configured on this server.
+    #[error("{0}")]
+    Unavailable(String),
+    /// An upstream service failed (e.g. Jev).
+    #[error("{0}")]
+    Upstream(String),
     #[error("interner Fehler")]
     Internal(#[from] anyhow::Error),
 }
@@ -27,6 +33,8 @@ impl AppError {
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::NotFound => StatusCode::NOT_FOUND,
+            AppError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            AppError::Upstream(_) => StatusCode::BAD_GATEWAY,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -37,6 +45,8 @@ impl AppError {
             AppError::Forbidden(_) => "forbidden",
             AppError::BadRequest(_) => "bad_request",
             AppError::NotFound => "not_found",
+            AppError::Unavailable(_) => "unavailable",
+            AppError::Upstream(_) => "upstream",
             AppError::Internal(_) => "internal",
         }
     }

@@ -33,6 +33,8 @@ struct Insight: Sendable, Hashable, Identifiable {
     let tone: Tone
     /// Ganz kurz für runde Komplikationen: „25′“, „−3°“, „68“.
     let badge: String
+    /// Gesetzt, wenn Jev diesen Hinweis nach vorn geholt hat (Decision.swift).
+    var jevProbability: Double?
 
     var id: Kind { kind }
 

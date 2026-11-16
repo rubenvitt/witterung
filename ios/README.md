@@ -55,12 +55,12 @@ starten (der Versuch zählt mit). Für eine neue Version `MARKETING_VERSION` erh
 
 ### Tests
 
-37 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
+41 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
 (Uelzen im November, Warnungen, Regen in 25 min, eine Quelle mit Kontingentfehler),
 PKCE-Testvektor aus RFC 7636 Anhang B, Nowcast-Sätze, Regenhinweis und stündliche
 Widget-Timeline, WMS-BBOX-Rechnung, deutsche Zahlen- und Zeitformate, dazu
 `InsightTests` für jede Regel von „Im Blick“, die Gewichte gegeneinander und die
-Kartenreihenfolge.
+Kartenreihenfolge, `DecisionTests` für Jevs Umordnung (Schwelle, Leitplanke, stabile Anfrage).
 
 Das Testbundle läuft ohne Host-App. Hängt `xcodebuild test` mit „The test runner hung
 before establishing connection“ (auf dem Entwicklungsrechner am 09.11.2026 so, der
@@ -193,7 +193,17 @@ der Hinweis mit dem höchsten Gewicht steht vorn.
 | Ruhiges Wetter | nichts davon | – |
 
 Was eine amtliche Warnung schon abdeckt (Sturm, Frost, Glätte, Gewitter …), bekommt keinen
-eigenen Hinweis. Neben dem Hinweis zeigt das Widget, was ihn erklärt: Radarbalken bei Regen,
+eigenen Hinweis.
+
+**Jev entscheidet die Reihenfolge.** Sind es mindestens zwei Hinweise, fragt App bzw. Widget
+über den Server [Jev](https://docs.typesafe.ai), das Entscheidungsmodell von TypeSafe
+(`Shared/Decision.swift`, `Shared/JevClient.swift`, Server `POST /api/v1/decide`). Jev bekommt
+die Lage (Temperatur, Radar-Satz, Warnungen, 12 Stunden) und die Hinweise als Optionen und gibt
+jedem eine Wahrscheinlichkeit. Übernommen wird das nur bei Konfidenz ≥ 0,5 und wenn Jev über
+genau die aktuellen Hinweise entschieden hat; rote und violette Warnungen bleiben immer vorn.
+Der Grund zeigt dann „· Jev 84 %“. Ohne Schlüssel auf dem Server, offline oder bei Fehlern
+gilt die Reihenfolge der Regeln (bzw. die letzte passende Jev-Antwort aus dem Cache).
+Die Gewichte unten sind also die Rückfallebene. Neben dem Hinweis zeigt das Widget, was ihn erklärt: Radarbalken bei Regen,
 die Tage bei Hitze und Umschwung, sonst den Stundenverlauf. Die Timeline ist dichter (in den
 ersten zwei Stunden alle 15 min), das Gewicht geht als `TimelineEntryRelevance` an den Smart
 Stack, und steht Warnung oder Radar-Regen vorn, lädt das Widget nach 15 statt 30 min neu.
