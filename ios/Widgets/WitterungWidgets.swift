@@ -137,7 +137,7 @@ struct Provider: AppIntentTimelineProvider {
 
     private func entry(_ snapshot: WeatherSnapshot?, at date: Date, place: PlaceEntity, context: Context) -> Entry {
         Entry(date: date, snapshot: snapshot, family: context.family, placeID: place.id,
-              relevanceScore: style == .focus ? snapshot?.focus.score : nil)
+              relevanceScore: style == .focus ? snapshot?.urgency : nil)
     }
 
     #if os(watchOS)
@@ -159,8 +159,10 @@ struct Provider: AppIntentTimelineProvider {
         var forecast = ForecastCache.load(place.ref)
         if forecast == nil { forecast = try? await fetch(place.ref) }
         let decision = style == .focus ? DecisionCache.load(place.ref) : nil
-        return entry(forecast.flatMap { WeatherSnapshot.make($0, at: .now, placeName: name(place, $0), decision: decision) },
-                     at: .now, place: place, context: context)
+        let baseline = style == .focus ? DigestStore.baseline(place.ref, now: .now) : nil
+        return entry(forecast.flatMap {
+            WeatherSnapshot.make($0, at: .now, placeName: name(place, $0), baseline: baseline, decision: decision)
+        }, at: .now, place: place, context: context)
     }
 
     func timeline(for configuration: SelectPlaceIntent, in context: Context) async -> Timeline<Entry> {
@@ -169,20 +171,25 @@ struct Provider: AppIntentTimelineProvider {
         // Erst frisch laden; ohne Netz trägt der Cache (stündliche Einträge bleiben richtig).
         var forecast = try? await fetch(place.ref)
         if forecast == nil { forecast = ForecastCache.load(place.ref) }
-        // „Im Blick“: Jev ordnet die Hinweise; ohne Antwort entscheiden die Regeln.
+        // „Im Blick“: Jev entscheidet Reihenfolge, Ansicht, Dringlichkeit und Gassi-Fenster;
+        // ohne Antwort entscheiden die Regeln. Vergleich mit einer älteren Vorhersage.
         var decision: JevDecision?
+        var baseline: ForecastDigest?
         if style == .focus, let forecast {
-            decision = await JevClient.decide(forecast, ref: place.ref, placeName: name(place, forecast), at: now)
+            DigestStore.record(forecast, for: place.ref)
+            baseline = DigestStore.baseline(place.ref, now: now)
+            decision = await JevClient.decide(forecast, ref: place.ref, placeName: name(place, forecast), at: now, baseline: baseline)
         }
         var entries = forecast.map { f in
-            WeatherSnapshot.timeline(f, now: now, dense: style.isDense, placeName: name(place, f), decision: decision).map {
+            WeatherSnapshot.timeline(f, now: now, dense: style.isDense, placeName: name(place, f),
+                                     baseline: baseline, decision: decision).map {
                 entry($0, at: $0.date, place: place, context: context)
             }
         } ?? []
         if entries.isEmpty { entries = [entry(nil, at: now, place: place, context: context)] }
-        // Steht Warnung oder Regen laut Radar vorn, lohnt ein früherer neuer Abruf.
-        let urgent = style == .focus && entries.first?.snapshot?.focus.isUrgent == true
-        return Timeline(entries: entries, policy: .after(now.addingTimeInterval((urgent ? 15 : 30) * 60)))
+        // Je dringender die Lage, desto früher der nächste Abruf (15, 30 oder 60 Minuten).
+        let minutes = style == .focus ? Urgency.refreshMinutes(entries.first?.snapshot?.urgency ?? 0.3) : 30
+        return Timeline(entries: entries, policy: .after(now.addingTimeInterval(minutes * 60)))
     }
 
     private func name(_ place: PlaceEntity, _ forecast: Forecast) -> String {

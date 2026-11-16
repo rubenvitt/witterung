@@ -20,13 +20,18 @@ struct PlaceView: View {
         ScrollView {
             VStack(spacing: Layout.sectionSpacing) {
                 if let forecast {
-                    // Was gerade zählt, bestimmt die Reihenfolge der Karten (Insight.swift).
+                    // Was gerade zählt, bestimmt Inhalt und Reihenfolge der Karten:
+                    // die Regeln finden die Hinweise, Jev wägt ab (Insight.swift, Decision.swift).
                     let now = Date.now
-                    let insights = Insight.rank(forecast, at: now).ordered(by: model.decisions[ref])
-                    HeaderView(title: model.title(ref), isCurrent: ref == .current, forecast: forecast)
+                    let decision = model.decisions[ref]
+                    let insights = Insight.ranked(forecast, at: now, baseline: model.baselines[ref], decision: decision)
+                    let mode = WidgetMode.decide(insights, at: now, decision: decision)
+                    let night = NightOutlook.make(forecast, at: now)
+                    HeaderView(title: model.title(ref), isCurrent: ref == .current, forecast: forecast,
+                               briefing: Briefing.sentence(insights, mode: mode, night: night))
                     FreshnessBadge(forecast: forecast, failure: model.failures[ref], loading: model.loading.contains(ref))
-                    ForEach(PlaceSection.order(for: insights), id: \.self) { section in
-                        card(section, forecast: forecast, insights: insights, now: now)
+                    ForEach(PlaceSection.order(for: insights, decision: decision, at: now), id: \.self) { section in
+                        card(section, forecast: forecast, insights: insights, mode: mode, night: night, now: now)
                             .id(section.rawValue)
                     }
                     AttributionFooter(forecast: forecast, ref: ref)
@@ -39,7 +44,10 @@ struct PlaceView: View {
             .padding(.bottom, Spacing.xl)
         }
         .scrollIndicators(.hidden)
-        .animation(.snappy, value: forecast.map { PlaceSection.order(for: Insight.rank($0, at: .now).ordered(by: model.decisions[ref])) })
+        .animation(.snappy, value: forecast.map {
+            PlaceSection.order(for: Insight.ranked($0, at: .now, baseline: model.baselines[ref], decision: model.decisions[ref]),
+                               decision: model.decisions[ref])
+        })
         #if DEBUG
         .task(id: forecast == nil) {
             // Screenshots: `-scrollTo daily` springt zu einem Abschnitt.
@@ -63,13 +71,17 @@ struct PlaceView: View {
     }
 
     @ViewBuilder
-    private func card(_ section: PlaceSection, forecast: Forecast, insights: [Insight], now: Date) -> some View {
+    private func card(_ section: PlaceSection, forecast: Forecast, insights: [Insight], mode: WidgetMode,
+                      night: NightOutlook?, now: Date) -> some View {
         switch section {
         case .alerts:
             if !forecast.alerts.isEmpty {
                 VStack(spacing: Layout.sectionSpacing) { ForEach(forecast.alerts) { AlertCard(alert: $0) } }
             }
-        case .focus: FocusCard(forecast: forecast, insights: insights, now: now)
+        case .focus:
+            FocusCard(forecast: forecast, insights: insights, mode: mode,
+                      outfit: Outfit.tip(forecast, at: now, insights: insights), now: now)
+        case .tonight: if let night { TonightCard(night: night) }
         case .nowcast: NowcastCard(forecast: forecast)
         case .hourly: HourlyCard(forecast: forecast)
         case .daily: DailyCard(forecast: forecast, ref: ref)
@@ -102,6 +114,8 @@ private struct HeaderView: View {
     let title: String
     let isCurrent: Bool
     let forecast: Forecast
+    /// Kernsatz aus den Hinweisen („Sturmböen, ab 15:00 … Außerdem: Regen 13:25“).
+    let briefing: String
 
     var body: some View {
         // Aus dem Cache: die Stunde von jetzt, nicht die vom Abrufzeitpunkt.
@@ -135,6 +149,14 @@ private struct HeaderView: View {
             }
             if let feels = current?.feelsLikeC {
                 Text("Gefühlt \(Fmt.temp(feels))").font(.subheadline).foregroundStyle(.secondary)
+            }
+            if !briefing.isEmpty {
+                Text(briefing)
+                    .font(.callout.weight(.medium))
+                    .multilineTextAlignment(.center)
+                    .padding(.top, Spacing.s)
+                    .padding(.horizontal, Spacing.l)
+                    .contentTransition(.opacity)
             }
         }
         .frame(maxWidth: .infinity)

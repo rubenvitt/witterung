@@ -9,7 +9,7 @@ import Foundation
 /// damit sie in Tests und auf jeder Plattform gleich läuft.
 struct Insight: Sendable, Hashable, Identifiable {
     enum Kind: String, Sendable, Hashable, CaseIterable {
-        case alert, rainNow, rainSoon, thunder, storm, ice, frost, snow, heat, rainLater, change, walk, uncertain, calm
+        case alert, rainNow, rainSoon, thunder, storm, ice, frost, snow, heat, rainLater, change, shift, walk, uncertain, calm
     }
 
     /// Farbe im Widget und auf der Karte (Theme.tone).
@@ -33,6 +33,12 @@ struct Insight: Sendable, Hashable, Identifiable {
     let tone: Tone
     /// Ganz kurz für runde Komplikationen: „25′“, „−3°“, „68“.
     let badge: String
+    /// Für Sperrbildschirm und Watch, höchstens etwa 14 Zeichen: „Regen 13:25“.
+    let short: String
+    /// Zweite Zeile dort, höchstens etwa 18 Zeichen: „bis 15:00“.
+    let shortDetail: String
+    /// Herkunft in einem Wort: „DWD“, „Radar“, „Konsens“.
+    let source: String
     /// Gesetzt, wenn Jev diesen Hinweis nach vorn geholt hat (Decision.swift).
     var jevProbability: Double?
 
@@ -52,8 +58,10 @@ struct Insight: Sendable, Hashable, Identifiable {
 
 extension Insight {
     /// Alle Hinweise für `now`, das Wichtigste zuerst. Nie leer: Ohne Auffälliges gibt es „Ruhiges Wetter“.
-    static func rank(_ forecast: Forecast, at now: Date) -> [Insight] {
-        let context = Context(forecast: forecast, now: now)
+    /// `baseline`: eine ältere Vorhersage zum Vergleich („Regen jetzt früher“), `window`: das
+    /// Gassi-Fenster, das Jev gewählt hat (`WalkWindow.id`).
+    static func rank(_ forecast: Forecast, at now: Date, baseline: ForecastDigest? = nil, window: String? = nil) -> [Insight] {
+        let context = Context(forecast: forecast, now: now, baseline: baseline)
         let candidates: [Insight?] = [
             context.alert(),
             context.rain(),
@@ -62,7 +70,8 @@ extension Insight {
             context.cold(),
             context.heat(),
             context.change(),
-            context.walk(),
+            context.shift(),
+            context.walk(choice: window),
             context.uncertain(),
         ]
         let found = candidates.compactMap { $0 }.sorted { $0.score > $1.score }
@@ -72,12 +81,18 @@ extension Insight {
     static func focus(_ forecast: Forecast, at now: Date) -> Insight {
         rank(forecast, at: now)[0]
     }
+
+    /// Trockene Zeitfenster für den Gassigang (Kandidaten für Jev).
+    static func walkWindows(_ forecast: Forecast, at now: Date) -> [WalkWindow] {
+        Context(forecast: forecast, now: now, baseline: nil).walkWindows()
+    }
 }
 
 /// Die Regeln. Schwellen und Gewichte stehen hier beieinander, damit man sie vergleichen kann.
 private struct Context {
     let forecast: Forecast
     let now: Date
+    let baseline: ForecastDigest?
 
     /// Stunden ab der laufenden bis `hours` voraus.
     func upcoming(_ hours: Double) -> [HourRow] {
@@ -112,12 +127,16 @@ private struct Context {
         // Was erst in einigen Stunden beginnt, darf hinter Regen in 10 Minuten stehen.
         let later = top.onset > now.addingTimeInterval(3 * 3600)
         let more = sorted.count > 1 ? " · \(sorted.count - 1) weitere" : ""
+        let when = top.onset <= now
+            ? top.expires.map { "bis \(Fmt.dayTime($0, now: now))" } ?? "aktiv"
+            : "ab \(Fmt.dayTime(top.onset, now: now))"
         return Insight(
             kind: .alert, score: base - (later ? 0.1 : 0),
             title: top.eventTitle,
             detail: top.timeRange(now: now).capitalizedFirst + more,
             reason: "\(top.severity.label) des DWD",
-            symbol: "exclamationmark.triangle.fill", tone: .alert(top.severity), badge: "!")
+            symbol: "exclamationmark.triangle.fill", tone: .alert(top.severity), badge: "!",
+            short: top.eventTitle, shortDetail: when, source: "DWD")
     }
 
     // MARK: Niederschlag
@@ -137,14 +156,18 @@ private struct Context {
                 score: 0.8 - 0.2 * min(1, Double(minutes) / 60) + (peak >= 4 ? 0.05 : 0),
                 title: summary.sentence ?? "Regen bald", detail: detail,
                 reason: "Regenradar des DWD, nächste 2 Stunden",
-                symbol: peak >= 4 ? "cloud.heavyrain.fill" : "cloud.rain.fill", tone: .rain, badge: "\(minutes)′")
+                symbol: peak >= 4 ? "cloud.heavyrain.fill" : "cloud.rain.fill", tone: .rain, badge: "\(minutes)′",
+                short: "Regen \(Fmt.time(start?.at ?? now))", shortDetail: end.map { "bis \(Fmt.time($0.at))" } ?? "hält an",
+                source: "Radar")
         case let .rainingEndsIn(minutes, peak):
             let end = points.first { !wet($0) }
+            let dryAt = Fmt.time(end?.at ?? now.addingTimeInterval(Double(minutes) * 60))
             return Insight(
                 kind: .rainNow, score: peak >= 4 ? 0.8 : 0.7,
-                title: summary.sentence ?? "Regen", detail: "Trocken ab \(Fmt.time(end?.at ?? now.addingTimeInterval(Double(minutes) * 60)))",
+                title: summary.sentence ?? "Regen", detail: "Trocken ab \(dryAt)",
                 reason: "Regenradar des DWD: es regnet gerade",
-                symbol: "umbrella.fill", tone: .rain, badge: "\(minutes)′")
+                symbol: "umbrella.fill", tone: .rain, badge: "\(minutes)′",
+                short: "Regen bis \(dryAt)", shortDetail: "dann trocken", source: "Radar")
         case let .rainingContinues(_, peak):
             let horizon = points.last.map { $0.at.addingTimeInterval(300) } ?? now
             let dry = forecast.hourly.first { $0.at >= horizon && $0.at < now.addingTimeInterval(12 * 3600) && $0.consensus.precipMm < 0.1 }
@@ -153,7 +176,9 @@ private struct Context {
                 title: summary.sentence ?? "Regen hält an",
                 detail: dry.map { "Trocken voraussichtlich ab \(Fmt.hour($0.at))" } ?? "Kein Ende in den nächsten 12 Stunden",
                 reason: "Regenradar des DWD, danach Konsens der Quellen",
-                symbol: "umbrella.fill", tone: .rain, badge: "☂︎")
+                symbol: "umbrella.fill", tone: .rain, badge: "☂︎",
+                short: "Regen hält an", shortDetail: dry.map { "trocken ab \(Fmt.hour($0.at))" } ?? "kein Ende in Sicht",
+                source: "Radar")
         case .dry, .none:
             return hourlyPrecip(after: summary == .none ? now : points.last.map { $0.at.addingTimeInterval(300) } ?? now,
                                 radarDry: summary != .none)
@@ -190,7 +215,10 @@ private struct Context {
             reason: reason,
             symbol: condition.isWet ? condition.symbol(isDay: first.consensus.isDay ?? true) : "cloud.rain.fill",
             tone: frozen ? .cold : .rain,
-            badge: isNow ? "☂︎" : "\(Fmt.calendar.component(.hour, from: first.at))h")
+            badge: isNow ? "☂︎" : "\(Fmt.calendar.component(.hour, from: first.at))h",
+            short: isNow ? "\(word) jetzt" : "\(word == "Schneeregen" ? "Schneereg." : word) \(Fmt.hour(first.at))",
+            shortDetail: end.map { $0 < now.addingTimeInterval(12 * 3600) ? "bis \(Fmt.hour($0))" : "länger" } ?? Fmt.mm(total),
+            source: "Konsens")
     }
 
     // MARK: Gewitter, Wind
@@ -205,7 +233,9 @@ private struct Context {
             title: row.at <= now ? "Gewitter möglich" : "Gewitter ab \(Fmt.hour(row.at))",
             detail: strongest.map { $0 >= 40 ? "Böen bis \(Fmt.kmh($0))" : "Blitz und Starkregen möglich" } ?? "Blitz und Starkregen möglich",
             reason: "Wetterlage im Konsens der Quellen",
-            symbol: "cloud.bolt.rain.fill", tone: .alert(.moderate), badge: "⚡︎")
+            symbol: "cloud.bolt.rain.fill", tone: .alert(.moderate), badge: "⚡︎",
+            short: row.at <= now ? "Gewitter" : "Gewitter \(Fmt.hour(row.at))",
+            shortDetail: strongest.map { $0 >= 40 ? "Böen \(Fmt.kmh($0))" : "möglich" } ?? "möglich", source: "Konsens")
     }
 
     func storm() -> Insight? {
@@ -224,7 +254,8 @@ private struct Context {
             kind: .storm, score: score, title: title,
             detail: "am stärksten gegen \(Fmt.hour(peak.at))\(direction)",
             reason: "Höchste Böe der nächsten 12 Stunden",
-            symbol: "wind", tone: .wind, badge: "\(Int(value.rounded()))")
+            symbol: "wind", tone: .wind, badge: "\(Int(value.rounded()))",
+            short: "Böen \(Fmt.kmh(value))", shortDetail: "gegen \(Fmt.hour(peak.at))", source: "Konsens")
     }
 
     // MARK: Kälte, Wärme
@@ -238,7 +269,8 @@ private struct Context {
                 kind: .ice, score: 0.7, title: "Glättegefahr",
                 detail: "\(icy.consensus.condition.label()) bei \(Fmt.temp(icy.consensus.tempC)) gegen \(Fmt.hour(icy.at))",
                 reason: "Niederschlag bei Temperaturen um 0°",
-                symbol: "snowflake", tone: .cold, badge: Fmt.temp(icy.consensus.tempC))
+                symbol: "snowflake", tone: .cold, badge: Fmt.temp(icy.consensus.tempC),
+                short: "Glätte", shortDetail: "gegen \(Fmt.hour(icy.at))", source: "Konsens")
         }
         guard !alertCovers(["FROST"]),
               let coldest = rows.min(by: { $0.consensus.tempC < $1.consensus.tempC }),
@@ -251,7 +283,9 @@ private struct Context {
             title: unsure ? "Frost möglich" : "Frost bis \(Fmt.temp(temp))",
             detail: "am kältesten gegen \(Fmt.hour(coldest.at))" + (unsure ? " · \(Fmt.temp(temp))" : ""),
             reason: unsure ? "Nicht alle Quellen erwarten Frost" : "Tiefstwert der nächsten 18 Stunden",
-            symbol: "thermometer.snowflake", tone: .cold, badge: Fmt.temp(temp))
+            symbol: "thermometer.snowflake", tone: .cold, badge: Fmt.temp(temp),
+            short: unsure ? "Frost möglich" : "Frost \(Fmt.temp(temp))", shortDetail: "gegen \(Fmt.hour(coldest.at))",
+            source: unsure ? "Quellen uneinig" : "Konsens")
     }
 
     /// Heute (bis 16 Uhr) oder morgen.
@@ -271,7 +305,8 @@ private struct Context {
             title: max >= 30 ? "Heiß: bis \(Fmt.temp(max))" : "Sommerlich: bis \(Fmt.temp(max))",
             detail: label == "heute" ? "Höchstwert heute" : "Höchstwert morgen",
             reason: max >= 30 ? "Ab 30° gilt ein Tag als heiß" : "Ab 25° gilt ein Tag als Sommertag",
-            symbol: "sun.max.fill", tone: .warm, badge: Fmt.temp(max))
+            symbol: "sun.max.fill", tone: .warm, badge: Fmt.temp(max),
+            short: max >= 30 ? "Heiß \(Fmt.temp(max))" : "Warm \(Fmt.temp(max))", shortDetail: label, source: "Konsens")
     }
 
     /// Morgen deutlich wärmer oder kälter als heute.
@@ -288,17 +323,17 @@ private struct Context {
             detail: "Höchstwert \(Fmt.temp(tomorrow.tempMaxC)) statt \(Fmt.temp(today.tempMaxC))",
             reason: "Höchstwert heute und morgen im Vergleich",
             symbol: delta < 0 ? "thermometer.low" : "thermometer.high", tone: delta < 0 ? .cold : .warm,
-            badge: "\(delta < 0 ? "−" : "+")\(degrees)°")
+            badge: "\(delta < 0 ? "−" : "+")\(degrees)°",
+            short: "Morgen \(delta < 0 ? "−" : "+")\(degrees)°", shortDetail: "H \(Fmt.temp(tomorrow.tempMaxC)) statt \(Fmt.temp(today.tempMaxC))",
+            source: "Konsens")
     }
 
     // MARK: Draußen
 
-    /// Gassi-Fenster: Regnet es in den nächsten 12 h, die erste trockene Lücke
-    /// von mindestens zwei Stunden zwischen 6 und 22 Uhr, sonst die längste.
-    func walk() -> Insight? {
+    /// Trockene Lücken (mind. 1 h) zwischen 6 und 22 Uhr in den nächsten 12 Stunden, höchstens vier.
+    func walkWindows() -> [WalkWindow] {
         let rows = upcoming(12)
         let isDry = { (r: HourRow) in r.consensus.precipMm < 0.1 && (r.consensus.precipProbPct ?? 0) < 50 && !r.consensus.condition.isWet }
-        guard rows.contains(where: { !isDry($0) }) else { return nil }
         // Läuft gerade Regen laut Radar, zählt die laufende Stunde nicht als trocken.
         let radarWet: Bool = switch NowcastSummary(forecast.nowcast, now: now) {
         case .rainingEndsIn, .rainingContinues: true
@@ -312,16 +347,78 @@ private struct Context {
             if usable { current.append(row) } else if !current.isEmpty { runs.append(current); current = [] }
         }
         if !current.isEmpty { runs.append(current) }
-        guard let run = runs.first(where: { $0.count >= 2 }) ?? runs.max(by: { $0.count < $1.count }),
-              let first = run.first, let last = run.last else { return nil }
-        let end = last.at.addingTimeInterval(3600)
-        let title = first.at <= now ? "Gassi-Fenster bis \(Fmt.hour(end))" : "Gassi-Fenster \(Fmt.hourRange(first.at, end))"
-        let mid = run[run.count / 2].consensus
+        return runs.prefix(4).enumerated().map { index, run in
+            let points = run.map(\.consensus)
+            return WalkWindow(
+                id: "w\(index)", start: max(run[0].at, now), end: run[run.count - 1].at.addingTimeInterval(3600),
+                hours: run.count,
+                tempC: points.map(\.tempC).reduce(0, +) / Double(points.count),
+                windKmh: points.map(\.windKmh).max() ?? 0,
+                daylight: points.allSatisfy { $0.isDay ?? true },
+                isNow: run[0].at <= now)
+        }
+    }
+
+    /// Gassi-Fenster: Regnet es in den nächsten 12 h, die erste trockene Lücke von mindestens
+    /// zwei Stunden (sonst die längste) – oder die, die Jev gewählt hat.
+    func walk(choice: String?) -> Insight? {
+        guard upcoming(12).contains(where: { $0.consensus.precipMm >= 0.1 || $0.consensus.condition.isWet }) else { return nil }
+        let windows = walkWindows()
+        let chosen = choice.flatMap { id in windows.first { $0.id == id } }
+        guard let window = chosen ?? windows.first(where: { $0.hours >= 2 }) ?? windows.max(by: { $0.hours < $1.hours }) else {
+            return nil
+        }
+        let title = window.isNow ? "Gassi-Fenster bis \(Fmt.hour(window.end))" : "Gassi-Fenster \(Fmt.hourRange(window.start, window.end))"
+        let startHour = Fmt.calendar.component(.hour, from: window.start)
+        let endHour = Fmt.calendar.component(.hour, from: window.end)
         return Insight(
-            kind: .walk, score: run.count >= 2 ? 0.42 : 0.32, title: title,
-            detail: "trocken, um \(Fmt.temp(mid.tempC))" + (mid.windKmh >= 25 ? ", windig" : ""),
-            reason: "Längste trockene Lücke zwischen den Schauern",
-            symbol: "dog.fill", tone: .info, badge: "\(Fmt.calendar.component(.hour, from: first.at))h")
+            kind: .walk, score: window.hours >= 2 ? 0.42 : 0.32, title: title,
+            detail: "trocken, um \(Fmt.temp(window.tempC))" + (window.windKmh >= 25 ? ", windig" : "") + (window.daylight ? "" : ", im Dunkeln"),
+            reason: chosen != nil ? "Bestes trockenes Fenster laut Jev" : "Längste trockene Lücke zwischen den Schauern",
+            symbol: "dog.fill", tone: .info, badge: "\(startHour)h",
+            short: window.isNow ? "Gassi bis \(endHour)h" : "Gassi \(startHour)–\(endHour)",
+            shortDetail: "trocken, \(Fmt.temp(window.tempC))", source: chosen != nil ? "Jev" : "Konsens")
+    }
+
+    // MARK: Vorhersage geändert
+
+    /// Vergleich mit einer 3–18 h älteren Vorhersage: Regen früher, später, neu oder abgesagt,
+    /// sonst ein deutlich anderer Höchstwert für morgen.
+    func shift() -> Insight? {
+        guard let baseline else { return nil }
+        let reason = "Vergleich mit der Vorhersage von \(Fmt.dayTime(baseline.generatedAt, now: now))"
+        let horizon = baseline.generatedAt.addingTimeInterval(24 * 3600)
+        let current = forecast.hourly.first {
+            $0.at.addingTimeInterval(3600) > now && $0.at < horizon && $0.consensus.precipMm >= ForecastDigest.rainMm
+        }?.at
+        let old = baseline.firstRain.flatMap { $0 > now ? $0 : nil }
+        func rainShift(_ score: Double, _ title: String, _ detail: String, _ short: String, _ shortDetail: String) -> Insight {
+            Insight(kind: .shift, score: score, title: title, detail: detail, reason: reason,
+                    symbol: "arrow.triangle.2.circlepath", tone: .rain, badge: "Neu",
+                    short: short, shortDetail: shortDetail, source: "Vergleich")
+        }
+        switch (old, current) {
+        case let (old?, new?) where abs(old.timeIntervalSince(new)) >= 2 * 3600:
+            let earlier = new < old
+            return rainShift(earlier ? 0.4 : 0.3, "Regen \(earlier ? "früher" : "später"): ab \(Fmt.hour(new))",
+                             "vorher ab \(Fmt.hour(old)) angesagt", "Regen \(earlier ? "früher" : "später")", "ab \(Fmt.hour(new))")
+        case let (nil, new?) where baseline.firstRain == nil:
+            return rainShift(0.38, "Regen neu: ab \(Fmt.hour(new))", "vorher war es trocken angesagt", "Regen neu", "ab \(Fmt.hour(new))")
+        case let (old?, nil):
+            return rainShift(0.3, "Regen fällt aus", "vorher ab \(Fmt.hour(old)) angesagt", "Kein Regen", "statt \(Fmt.hour(old))")
+        default:
+            break
+        }
+        let key = Fmt.dayString(now.addingTimeInterval(86_400))
+        guard let was = baseline.dailyMax[key], let isNow = forecast.daily.first(where: { $0.date == key })?.consensus.tempMaxC,
+              abs(isNow - was) >= 3 else { return nil }
+        let degrees = Int(abs(isNow - was).rounded())
+        let colder = isNow < was
+        return Insight(
+            kind: .shift, score: 0.3, title: "Morgen \(degrees)° \(colder ? "kälter" : "wärmer") als angesagt",
+            detail: "Höchstwert jetzt \(Fmt.temp(isNow)) statt \(Fmt.temp(was))", reason: reason,
+            symbol: "arrow.triangle.2.circlepath", tone: colder ? .cold : .warm, badge: "\(colder ? "−" : "+")\(degrees)°",
+            short: "Morgen \(colder ? "kälter" : "wärmer")", shortDetail: "\(Fmt.temp(isNow)) statt \(Fmt.temp(was))", source: "Vergleich")
     }
 
     // MARK: Quellen
@@ -339,14 +436,17 @@ private struct Context {
                 kind: .uncertain, score: 0.25, title: "Quellen uneinig",
                 detail: "Temperatur gegen \(Fmt.hour(widest.at)): \(Fmt.temp(widest.spread.tempC?.min)) bis \(Fmt.temp(widest.spread.tempC?.max))",
                 reason: "Spannbreite aus \(widest.nSources) Quellen",
-                symbol: "arrow.left.and.right", tone: .info, badge: "±\(Int((width(widest.spread.tempC) / 2).rounded()))°")
+                symbol: "arrow.left.and.right", tone: .info, badge: "±\(Int((width(widest.spread.tempC) / 2).rounded()))°",
+                short: "Quellen uneinig", shortDetail: "±\(Int((width(widest.spread.tempC) / 2).rounded()))° gegen \(Fmt.hour(widest.at))",
+                source: "Quellen")
         }
         if let split, let agreement = split.spread.precipAgreementPct {
             return Insight(
                 kind: .uncertain, score: 0.25, title: "Regen unsicher",
                 detail: "gegen \(Fmt.hour(split.at)) erwarten \(Int(agreement.rounded())) % der Quellen Regen",
                 reason: "Spannbreite aus \(split.nSources) Quellen",
-                symbol: "questionmark.circle", tone: .info, badge: "\(Int(agreement.rounded()))%")
+                symbol: "questionmark.circle", tone: .info, badge: "\(Int(agreement.rounded()))%",
+                short: "Regen unsicher", shortDetail: "\(Int(agreement.rounded())) % gegen \(Fmt.hour(split.at))", source: "Quellen")
         }
         return nil
     }
@@ -365,27 +465,92 @@ private struct Context {
             kind: .calm, score: 0.1, title: "Ruhiges Wetter",
             detail: ["\(condition.label(isDay: isDay)), kein Regen in Sicht", range].compactMap { $0 }.joined(separator: " · "),
             reason: "Keine Warnung, kein Regen, kein Frost in den nächsten 12 Stunden",
-            symbol: condition.symbol(isDay: isDay), tone: .calm, badge: Fmt.temp(hour?.tempC))
+            symbol: condition.symbol(isDay: isDay), tone: .calm, badge: Fmt.temp(hour?.tempC),
+            short: "Ruhig", shortDetail: day.map { "\(Fmt.temp($0.tempMinC)) bis \(Fmt.temp($0.tempMaxC))" } ?? condition.label(isDay: isDay),
+            source: "Konsens")
     }
 }
 
 /// Karten der Ortsseite. Die Reihenfolge richtet sich nach dem wichtigsten Hinweis.
 enum PlaceSection: String, CaseIterable, Sendable {
-    case alerts, focus, nowcast, hourly, daily, details, sources
+    case alerts, focus, nowcast, tonight, hourly, daily, details, sources
 
     /// Warnungen stehen immer oben. Danach, was der wichtigste Hinweis braucht:
     /// Regen → Radar vor allem anderen, Umschwung oder Hitze → 10 Tage vor den Stunden,
     /// Wind → Messwerte nach oben, uneinige Quellen → Quellenvergleich nach oben.
-    static func order(for insights: [Insight]) -> [PlaceSection] {
-        let standard: [PlaceSection] = [.alerts, .focus, .nowcast, .hourly, .daily, .details, .sources]
-        guard let top = insights.first(where: { $0.kind != .alert }) ?? insights.first else { return standard }
-        switch top.kind {
-        case .rainNow, .rainSoon: return [.alerts, .nowcast, .focus, .hourly, .daily, .details, .sources]
-        case .heat, .change: return [.alerts, .focus, .daily, .nowcast, .hourly, .details, .sources]
-        case .storm: return [.alerts, .focus, .details, .nowcast, .hourly, .daily, .sources]
-        case .uncertain: return [.alerts, .focus, .nowcast, .hourly, .sources, .daily, .details]
-        default: return standard
+    /// Abends (ab 17 Uhr) und nachts rückt „Heute Nacht“ nach oben, tagsüber steht es nach den 10 Tagen.
+    static func order(for insights: [Insight], at now: Date = .now) -> [PlaceSection] {
+        let hour = Fmt.calendar.component(.hour, from: now)
+        let evening = hour >= 17 || hour < 5
+        var order: [PlaceSection] = [.alerts, .focus, .nowcast, .hourly, .daily, .details, .sources]
+        if let top = insights.first(where: { $0.kind != .alert }) ?? insights.first {
+            switch top.kind {
+            case .rainNow, .rainSoon: order = [.alerts, .nowcast, .focus, .hourly, .daily, .details, .sources]
+            case .heat, .change: order = [.alerts, .focus, .daily, .nowcast, .hourly, .details, .sources]
+            case .storm: order = [.alerts, .focus, .details, .nowcast, .hourly, .daily, .sources]
+            case .uncertain, .shift: order = [.alerts, .focus, .nowcast, .hourly, .sources, .daily, .details]
+            default: break
+            }
         }
+        let tonightAfter: PlaceSection = evening ? .focus : .daily
+        order.insert(.tonight, at: (order.firstIndex(of: tonightAfter) ?? order.count - 1) + 1)
+        return order
+    }
+}
+
+/// Ein trockenes Zeitfenster für den Gassigang.
+struct WalkWindow: Sendable, Hashable {
+    let id: String
+    let start: Date
+    let end: Date
+    let hours: Int
+    let tempC: Double
+    let windKmh: Double
+    let daylight: Bool
+    let isNow: Bool
+
+    /// Beschreibung für Jev: „17–19 Uhr (2 h): trocken, 7°, Wind bis 15 km/h, dunkel“.
+    var summary: String {
+        "\(isNow ? "jetzt bis \(Fmt.hour(end))" : Fmt.hourRange(start, end)) (\(hours) h): trocken, \(Fmt.temp(tempC)), "
+            + "Wind bis \(Fmt.kmh(windKmh)), \(daylight ? "hell" : "dunkel")"
+    }
+}
+
+/// Kurzfassung einer Vorhersage, um spätere Vorhersagen damit zu vergleichen.
+struct ForecastDigest: Codable, Sendable, Equatable {
+    static let rainMm = 0.2
+
+    let generatedAt: Date
+    /// Erste Stunde mit Regen (Median ≥ 0,2 mm) in den 24 h nach `generatedAt`.
+    let firstRain: Date?
+    /// Höchstwert je Tag (`JJJJ-MM-TT`).
+    let dailyMax: [String: Double]
+
+    init(generatedAt: Date, firstRain: Date?, dailyMax: [String: Double]) {
+        self.generatedAt = generatedAt
+        self.firstRain = firstRain
+        self.dailyMax = dailyMax
+    }
+
+    init(_ forecast: Forecast) {
+        let start = forecast.generatedAt
+        generatedAt = start
+        firstRain = forecast.hourly.first {
+            $0.at.addingTimeInterval(3600) > start && $0.at < start.addingTimeInterval(24 * 3600) && $0.consensus.precipMm >= Self.rainMm
+        }?.at
+        dailyMax = Dictionary(forecast.daily.map { ($0.date, $0.consensus.tempMaxC) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Vergleichsstand für `now`: der jüngste Eintrag, der 3–18 Stunden alt ist.
+    static func baseline(in history: [ForecastDigest], now: Date) -> ForecastDigest? {
+        history.filter { (3 * 3600...18 * 3600).contains(now.timeIntervalSince($0.generatedAt)) }
+            .max { $0.generatedAt < $1.generatedAt }
+    }
+
+    /// Neuer Eintrag höchstens stündlich, nur die letzten 24 bleiben.
+    static func appending(_ digest: ForecastDigest, to history: [ForecastDigest]) -> [ForecastDigest] {
+        if let last = history.last, digest.generatedAt.timeIntervalSince(last.generatedAt) < 3600 { return history }
+        return Array((history + [digest]).suffix(24))
     }
 }
 

@@ -241,15 +241,31 @@ struct WeatherSnapshot: Sendable {
     let insights: [Insight]
     /// Radar-Nowcast ab diesem Zeitpunkt in mm/h, 5-min-Schritte (leer ohne Radar).
     let radar: [Double]
+    /// Ansicht des Smart-Widgets (Jev oder Regeln).
+    let mode: WidgetMode
+    /// 0…1, für Smart Stack und Neuladen.
+    let urgency: Double
+    let night: NightOutlook?
+    /// Kernsatz aus den Hinweisen.
+    let briefing: String
+    /// „Warme Jacke, Schirm, Leuchthalsband für den Hund“
+    let outfit: String?
+    /// Warum diese Ansicht („Abends zählen Nacht und Morgen · Jev“).
+    let modeReason: String
+
+    /// Regenhinweis für Sperrbildschirm und Watch.
+    var shortRainHint: String { rainHint == "Kein Regen in Sicht" ? "Trocken" : rainHint }
 
     var focus: Insight { insights[0] }
 
     /// Einträge ab `now`: erst jetzt, dann zu jeder vollen Stunde, solange es Daten gibt.
     /// `dense`: in den ersten zwei Stunden (Radar) alle 15 Minuten, für das Fokus-Widget.
-    /// `decision`: Reihenfolge von Jev; gilt für jeden Eintrag, dessen Hinweise dieselben sind.
+    /// `decision`: Entscheidungen von Jev; die Reihenfolge gilt für jeden Eintrag, dessen Hinweise dieselben sind.
     static func timeline(_ forecast: Forecast, now: Date, count: Int = 8, dense: Bool = false, placeName: String? = nil,
-                         decision: JevDecision? = nil) -> [WeatherSnapshot] {
-        dates(now: now, count: count, dense: dense).compactMap { make(forecast, at: $0, placeName: placeName, decision: decision) }
+                         baseline: ForecastDigest? = nil, decision: JevDecision? = nil) -> [WeatherSnapshot] {
+        dates(now: now, count: count, dense: dense).compactMap {
+            make(forecast, at: $0, placeName: placeName, baseline: baseline, decision: decision)
+        }
     }
 
     static func dates(now: Date, count: Int = 8, dense: Bool = false) -> [Date] {
@@ -263,13 +279,17 @@ struct WeatherSnapshot: Sendable {
         return [now] + quarters.filter { $0 < radarEnd } + hourly.filter { $0 >= radarEnd }
     }
 
-    static func make(_ forecast: Forecast, at date: Date, placeName: String? = nil, decision: JevDecision? = nil) -> WeatherSnapshot? {
+    static func make(_ forecast: Forecast, at date: Date, placeName: String? = nil, baseline: ForecastDigest? = nil,
+                     decision: JevDecision? = nil) -> WeatherSnapshot? {
         // Ohne Stundenwert für `date` ist die Vorhersage abgelaufen: lieber „keine Daten“ als alte Werte.
         guard let row = forecast.hour(at: date)?.consensus else { return nil }
         // Beobachtung gilt, solange sie frisch ist; danach die Prognose der Stunde.
         let observed = forecast.now.observed.flatMap { o in date.timeIntervalSince(o.at) < 90 * 60 ? o : nil }
         let day = forecast.day(at: date)?.consensus
         let isDay = row.isDay ?? true
+        let insights = Insight.ranked(forecast, at: date, baseline: baseline, decision: decision)
+        let mode = WidgetMode.decide(insights, at: date, decision: decision)
+        let night = NightOutlook.make(forecast, at: date)
         return WeatherSnapshot(
             date: date,
             placeName: placeName ?? forecast.location.name,
@@ -290,8 +310,14 @@ struct WeatherSnapshot: Sendable {
             },
             generatedAt: forecast.generatedAt,
             hasWeatherKit: forecast.hasWeatherKit,
-            insights: Insight.rank(forecast, at: date).ordered(by: decision),
-            radar: (forecast.nowcast?.points ?? []).filter { $0.at.addingTimeInterval(300) > date }.map(\.precipMmH)
+            insights: insights,
+            radar: (forecast.nowcast?.points ?? []).filter { $0.at.addingTimeInterval(300) > date }.map(\.precipMmH),
+            mode: mode,
+            urgency: Urgency.value(insights, decision: decision),
+            night: night,
+            briefing: Briefing.sentence(insights, mode: mode, night: night),
+            outfit: Outfit.tip(forecast, at: date, insights: insights),
+            modeReason: mode.reason + (WidgetMode.jevChoice(insights, decision: decision) != nil ? " · Jev" : "")
         )
     }
 }

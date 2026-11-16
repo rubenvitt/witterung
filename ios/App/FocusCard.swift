@@ -5,6 +5,9 @@ import SwiftUI
 struct FocusCard: View {
     let forecast: Forecast
     let insights: [Insight]
+    /// Hält Jev (oder die Regeln) die Lage für ruhig, wird die Karte zur kompakten Zeile.
+    let mode: WidgetMode
+    let outfit: String?
     let now: Date
 
     var body: some View {
@@ -12,12 +15,19 @@ struct FocusCard: View {
         let shown = insights.filter { insight in
             insight.kind != .alert && !(radarShowsRain && [.rainNow, .rainSoon].contains(insight.kind))
         }
-        if let calm = shown.first, calm.kind == .calm {
-            // Nichts Auffälliges: eine Zeile, die das ausdrücklich sagt.
-            HStack(spacing: Spacing.s) {
-                InsightSymbol(insight: calm)
-                Text(calm.title).font(.subheadline.weight(.semibold))
-                Text(calm.reason).font(.caption).foregroundStyle(.white.opacity(0.75)).lineLimit(2)
+        let quiet = shown.first?.kind == .calm || (mode == .calm && shown.first?.isUrgent != true)
+        if quiet {
+            // Nichts Auffälliges: kurz sagen, was trotzdem gilt.
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                HStack(spacing: Spacing.s) {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                    Text("Ruhiges Wetter").font(.subheadline.weight(.semibold))
+                }
+                let notes = shown.filter { $0.kind != .calm }.prefix(3).map(\.short)
+                if !notes.isEmpty {
+                    Text("Am Rand: " + notes.joined(separator: " · ")).font(.caption).foregroundStyle(.white.opacity(0.8))
+                }
+                if let outfit { OutfitRow(text: outfit) }
             }
             .padding(Layout.cardPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -30,9 +40,28 @@ struct FocusCard: View {
                         if index > 0 { Divider().overlay(.white.opacity(0.2)) }
                         InsightDetailRow(insight: insight, isPrimary: index == 0)
                     }
+                    if let outfit {
+                        Divider().overlay(.white.opacity(0.2))
+                        OutfitRow(text: outfit)
+                    }
                 }
             }
         }
+    }
+}
+
+/// „Für draußen: warme Jacke, Schirm, Leuchthalsband für den Hund“
+private struct OutfitRow: View {
+    let text: String
+
+    var body: some View {
+        Label {
+            Text("**Für draußen:** \(text)")
+        } icon: {
+            Image(systemName: "tshirt.fill")
+        }
+        .font(.subheadline)
+        .foregroundStyle(.white.opacity(0.9))
     }
 }
 

@@ -66,7 +66,7 @@ struct InsightTests {
     @Test func fixtureOrdersRadarFirst() throws {
         let insights = Insight.rank(try Self.fixture(), at: Self.start)
         // Warnungen bleiben oben, dann das Radar, weil Regen der wichtigste Hinweis nach der Warnung ist.
-        #expect(PlaceSection.order(for: insights) == [.alerts, .nowcast, .focus, .hourly, .daily, .details, .sources])
+        #expect(PlaceSection.order(for: insights) == [.alerts, .nowcast, .focus, .hourly, .daily, .tonight, .details, .sources])
     }
 
     @Test func snapshotCarriesFocusAndRadar() throws {
@@ -94,7 +94,7 @@ struct InsightTests {
         let insights = Insight.rank(Self.forecast(temps: Array(repeating: 8, count: 24)), at: Self.start)
         #expect(insights.map(\.kind) == [.calm])
         #expect(insights[0].title == "Ruhiges Wetter")
-        #expect(PlaceSection.order(for: insights) == [.alerts, .focus, .nowcast, .hourly, .daily, .details, .sources])
+        #expect(PlaceSection.order(for: insights) == [.alerts, .focus, .nowcast, .hourly, .daily, .tonight, .details, .sources])
     }
 
     @Test func rainLaterFromHoursWithWalkWindowBefore() {
@@ -138,7 +138,7 @@ struct InsightTests {
         #expect(storm.first?.kind == .storm)
         #expect(storm.first?.title == "Sturmböen bis 78 km/h")
         #expect(storm.first?.detail == "am stärksten gegen 16 Uhr aus SW")
-        #expect(PlaceSection.order(for: storm) == [.alerts, .focus, .details, .nowcast, .hourly, .daily, .sources])
+        #expect(PlaceSection.order(for: storm) == [.alerts, .focus, .details, .nowcast, .hourly, .daily, .tonight, .sources])
         // Mit amtlicher Warnung kein doppelter Hinweis.
         let warned = Insight.rank(Self.forecast(temps: Array(repeating: 8, count: 24), gusts: gusts,
                                                 alerts: [Self.alert("STURMBÖEN", .moderate)]), at: Self.start)
@@ -166,7 +166,7 @@ struct InsightTests {
         #expect(insights.first?.kind == .change)
         #expect(insights.first?.title == "Morgen 8° kälter")
         #expect(insights.first?.detail == "Höchstwert 2° statt 10°")
-        #expect(PlaceSection.order(for: insights) == [.alerts, .focus, .daily, .nowcast, .hourly, .details, .sources])
+        #expect(PlaceSection.order(for: insights) == [.alerts, .focus, .daily, .tonight, .nowcast, .hourly, .details, .sources])
     }
 
     @Test func heat() {
@@ -198,7 +198,7 @@ struct InsightTests {
         let insights = Insight.rank(Self.forecast(temps: Array(repeating: 8, count: 24), tempSpread: 6), at: Self.start)
         #expect(insights.first?.kind == .uncertain)
         #expect(insights.first?.title == "Quellen uneinig")
-        #expect(PlaceSection.order(for: insights) == [.alerts, .focus, .nowcast, .hourly, .sources, .daily, .details])
+        #expect(PlaceSection.order(for: insights) == [.alerts, .focus, .nowcast, .hourly, .sources, .daily, .tonight, .details])
     }
 
     @Test func rainingNowByRadar() {
@@ -210,58 +210,207 @@ struct InsightTests {
     }
 }
 
-/// Jev ordnet die Hinweise der Regeln (Decision.swift).
+/// Jevs Entscheidungen und ihre Leitplanken (Decision.swift).
 struct DecisionTests {
-    static func decision(_ p: [String: Double], confidence: Double = 0.7) -> JevDecision {
-        JevDecision(choice: p.max { $0.value < $1.value }!.key, probabilities: p, confidence: confidence, model: "jev-1.13.0")
+    static func choice(_ p: [String: Double], confidence: Double = 0.7) -> JevDecision.Choice {
+        JevDecision.Choice(choice: p.max { $0.value < $1.value }!.key, probabilities: p, confidence: confidence)
+    }
+
+    static func decision(focus: [String: Double]? = nil, mode: String? = nil, urgency: Double? = nil,
+                         sections: [String: Double]? = nil, window: String? = nil, confidence: Double = 0.7) -> JevDecision {
+        JevDecision(model: "jev-1.13.0", focus: focus.map { choice($0, confidence: confidence) },
+                    mode: mode.map { choice([$0: 0.8], confidence: confidence) },
+                    urgency: urgency.map { JevDecision.Score(score: $0, confidence: confidence) },
+                    sections: sections.map { choice($0, confidence: confidence) },
+                    window: window.map { choice([$0: 0.9], confidence: confidence) })
     }
 
     @Test func jevReordersWhenConfident() throws {
-        let insights = Insight.rank(try InsightTests.fixture(), at: InsightTests.start)
-        let ordered = insights.ordered(by: Self.decision(["alert": 0.1, "rainSoon": 0.2, "walk": 0.7]))
+        let forecast = try InsightTests.fixture()
+        let ordered = Insight.ranked(forecast, at: InsightTests.start,
+                                     decision: Self.decision(focus: ["alert": 0.1, "rainSoon": 0.2, "walk": 0.7]))
         #expect(ordered.map(\.kind) == [.walk, .rainSoon, .alert])
         #expect(ordered[0].jevProbability == 0.7)
         #expect(ordered[0].reasonLine == "Längste trockene Lücke zwischen den Schauern · Jev 70 %")
+        #expect(ordered[0].shortReason == "Jev 70 %")
         #expect(ordered[1].jevProbability == nil)
-        #expect(ordered[1].reasonLine == ordered[1].reason)
+        #expect(ordered[1].shortReason == "Radar")
     }
 
     @Test func rulesStayWhenUnsureOrDifferent() throws {
         let insights = Insight.rank(try InsightTests.fixture(), at: InsightTests.start)
-        // Zu unsicher
-        #expect(insights.ordered(by: Self.decision(["alert": 0.3, "rainSoon": 0.3, "walk": 0.4], confidence: 0.3)) == insights)
-        // Jev kannte andere Hinweise (Lage hat sich geändert)
-        #expect(insights.ordered(by: Self.decision(["alert": 0.1, "walk": 0.9])) == insights)
+        let unsure = Self.decision(focus: ["alert": 0.3, "rainSoon": 0.3, "walk": 0.4], confidence: 0.3)
+        #expect(insights.ordered(by: unsure.focus) == insights)
+        #expect(insights.ordered(by: Self.decision(focus: ["alert": 0.1, "walk": 0.9]).focus) == insights)
         #expect(insights.ordered(by: nil) == insights)
     }
 
     @Test func severeAlertIsPinned() {
         let nowcast = NowcastTests.nowcast([0, 1, 1, 1, 1, 1])
-        let insights = Insight.rank(InsightTests.forecast(temps: Array(repeating: 8, count: 24),
-                                                          alerts: [InsightTests.alert("ORKANBÖEN", .severe)], nowcast: nowcast),
-                                    at: InsightTests.start)
-        #expect(insights.map(\.kind) == [.alert, .rainSoon])
-        let ordered = insights.ordered(by: Self.decision(["alert": 0.05, "rainSoon": 0.95]))
+        let forecast = InsightTests.forecast(temps: Array(repeating: 8, count: 24),
+                                             alerts: [InsightTests.alert("ORKANBÖEN", .severe)], nowcast: nowcast)
+        let d = Self.decision(focus: ["alert": 0.05, "rainSoon": 0.95], mode: "days", urgency: 0.2)
+        let ordered = Insight.ranked(forecast, at: InsightTests.start, decision: d)
         #expect(ordered.map(\.kind) == [.alert, .rainSoon])
         #expect(ordered[0].jevProbability == nil)
+        // Rote Warnung: immer der Hinweis groß und volle Dringlichkeit.
+        #expect(WidgetMode.decide(ordered, at: InsightTests.start, decision: d) == .hint)
+        #expect(Urgency.value(ordered, decision: d) == 1)
+    }
+
+    @Test func jevChoosesModeUrgencyAndWalkWindow() throws {
+        let forecast = try InsightTests.fixture()
+        let rules = Insight.rank(forecast, at: InsightTests.start)
+        #expect(WidgetMode.decide(rules, at: InsightTests.start, decision: nil) == .hint)
+        #expect(WidgetMode.decide(rules, at: InsightTests.start, decision: Self.decision(mode: "hours")) == .hours)
+        #expect(WidgetMode.decide(rules, at: InsightTests.start, decision: Self.decision(mode: "hours", confidence: 0.2)) == .hint)
+        #expect(Urgency.value(rules, decision: Self.decision(urgency: 1.5)) == 0.5)
+        #expect(Urgency.value(rules, decision: nil) == rules[0].score)
+        #expect(Urgency.refreshMinutes(0.8) == 15)
+        #expect(Urgency.refreshMinutes(0.1) == 60)
+
+        // Zwei Fenster an einem Nachmittag mit Schauer dazwischen: Jev wählt das zweite.
+        var precip = Array(repeating: 0.0, count: 24)
+        precip[3] = 1.0 // 16 Uhr MEZ
+        let showers = InsightTests.forecast(temps: Array(repeating: 8, count: 24), precip: precip)
+        let windows = Insight.walkWindows(showers, at: InsightTests.start)
+        #expect(windows.map(\.id) == ["w0", "w1"])
+        #expect(windows[0].summary == "jetzt bis 16 Uhr (3 h): trocken, 8°, Wind bis 10 km/h, hell")
+        let byRules = Insight.rank(showers, at: InsightTests.start).first { $0.kind == .walk }
+        #expect(byRules?.title == "Gassi-Fenster bis 16 Uhr")
+        let byJev = Insight.ranked(showers, at: InsightTests.start, decision: Self.decision(window: "w1")).first { $0.kind == .walk }
+        #expect(byJev?.title == "Gassi-Fenster 17–22 Uhr")
+        #expect(byJev?.short == "Gassi 17–22")
+        #expect(byJev?.reason == "Bestes trockenes Fenster laut Jev")
+    }
+
+    @Test func sectionsFollowJevButAlertsStayFirst() throws {
+        let insights = Insight.rank(try InsightTests.fixture(), at: InsightTests.start)
+        let d = Self.decision(sections: ["details": 0.5, "sources": 0.3, "focus": 0.2])
+        let order = PlaceSection.order(for: insights, decision: d, at: InsightTests.start)
+        #expect(order.prefix(4) == [.alerts, .details, .sources, .focus])
+        #expect(Set(order) == Set(PlaceSection.allCases))
+        // Abends steht „Heute Nacht“ gleich nach „Im Blick“.
+        let evening = InsightTests.start.addingTimeInterval(6 * 3600) // 19 Uhr MEZ
+        let calm = Insight.rank(InsightTests.forecast(temps: Array(repeating: 8, count: 24)), at: evening)
+        #expect(PlaceSection.order(for: calm, at: evening).prefix(3) == [.alerts, .focus, .tonight])
     }
 
     @Test func requestIsCompactAndStableWithinAQuarter() throws {
         let forecast = try InsightTests.fixture()
-        let request = try #require(DecisionRequest.make(forecast, placeName: "Uelzen", at: InsightTests.start))
+        let request = DecisionRequest.make(forecast, placeName: "Uelzen", at: InsightTests.start)
         #expect(Set(request.options.keys) == ["alert", "rainSoon", "walk"])
         #expect(request.options["rainSoon"] == "Regen in 25 Minuten. ab 13:25, bis etwa 15:00. Grund: Regenradar des DWD, nächste 2 Stunden")
+        #expect(request.windows == ["w0": "17–22 Uhr (5 h): trocken, 6°, Wind bis 20 km/h, dunkel"])
         #expect(request.state.localTime == "Mo 13:00")
         #expect(request.state.radar == "Regen in 25 Minuten")
         #expect(request.state.nextHours.count == 12)
-        #expect(request.state.alerts.first?.event == "Sturmböen")
+        #expect(request.state.tonight?.hasPrefix("Tiefstwert") == true)
         // 7 Minuten später: dieselbe Anfrage, der Server antwortet aus dem Cache.
         let later = DecisionRequest.make(forecast, placeName: "Uelzen", at: InsightTests.start.addingTimeInterval(7 * 60))
         #expect(later == request)
         let json = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
         #expect(json.contains("\"nextHours\""))
-        // Nichts zu entscheiden bei nur einem Hinweis.
+        // Auch bei nur einem Hinweis wird gefragt (Ansicht, Dringlichkeit, Karten).
         let calm = InsightTests.forecast(temps: Array(repeating: 8, count: 24))
-        #expect(DecisionRequest.make(calm, placeName: "X", at: InsightTests.start) == nil)
+        #expect(DecisionRequest.make(calm, placeName: "X", at: InsightTests.start).options.keys.sorted() == ["calm"])
+    }
+
+    @Test func decodesServerAnswer() throws {
+        let json = """
+        {"model":"jev-1.13.0","focus":null,"mode":{"choice":"tonight","probabilities":{"tonight":0.7},"confidence":0.6},
+         "urgency":{"score":1.2,"confidence":0.5},"sections":null,"window":null}
+        """
+        let d = try JSONDecoder().decode(JevDecision.self, from: Data(json.utf8))
+        #expect(d.mode?.choice == "tonight")
+        #expect(d.focus == nil)
+        #expect(d.windowChoice == nil)
+    }
+}
+
+/// Kurztexte, Nacht, Kernsatz, Vergleich mit älterer Vorhersage.
+struct OutlookTests {
+    @Test func shortTextsFitLockScreen() throws {
+        var precip = Array(repeating: 0.0, count: 24)
+        precip[4] = 1.2
+        var gusts = Array(repeating: 30.0, count: 24)
+        gusts[3] = 78
+        var temps = Array(repeating: 3.0, count: 24)
+        temps[14] = -3
+        let forecasts = [
+            try InsightTests.fixture(),
+            InsightTests.forecast(temps: temps, precip: precip, gusts: gusts, days: [(2, 10), (-2, 2)]),
+            InsightTests.forecast(temps: Array(repeating: 8, count: 24), tempSpread: 6),
+        ]
+        let all = forecasts.flatMap { Insight.rank($0, at: InsightTests.start) }
+        #expect(all.count >= 6)
+        for insight in all {
+            #expect(insight.short.count <= 16, "\(insight.kind): \(insight.short)")
+            #expect(insight.shortDetail.count <= 18, "\(insight.kind): \(insight.shortDetail)")
+            #expect(insight.source.count <= 16)
+        }
+        let rain = all.first { $0.kind == .rainSoon }
+        #expect(rain?.short == "Regen 13:25")
+        #expect(rain?.shortDetail == "bis 15:00")
+        #expect(all.first { $0.kind == .storm }?.short == "Böen 78 km/h")
+    }
+
+    @Test func tonight() {
+        var temps = Array(repeating: 6.0, count: 24)
+        temps[16] = -1 // 5 Uhr MEZ
+        var precip = Array(repeating: 0.0, count: 24)
+        precip[9] = 0.4 // 22 Uhr
+        let forecast = InsightTests.forecast(temps: temps, precip: precip)
+        let night = NightOutlook.make(forecast, at: InsightTests.start)
+        #expect(night?.start == InsightTests.start.addingTimeInterval(7 * 3600)) // 20 Uhr
+        #expect(night?.low == -1)
+        #expect(night?.frost == true)
+        #expect(night?.wetFrom == InsightTests.start.addingTimeInterval(9 * 3600))
+        #expect(night?.summary == "Tiefstwert -1° gegen 5 Uhr, Niederschlag ab 22 Uhr (0,4 mm), um 7 Uhr 6°")
+        #expect(night?.hours.count == 12)
+        // Nach 20 Uhr beginnt die Nacht jetzt.
+        let late = InsightTests.start.addingTimeInterval(8 * 3600 + 600)
+        #expect(NightOutlook.make(forecast, at: late)?.start == late)
+    }
+
+    @Test func briefingAndOutfit() throws {
+        let forecast = try InsightTests.fixture()
+        let insights = Insight.rank(forecast, at: InsightTests.start)
+        #expect(Briefing.sentence(insights, mode: .hint, night: nil)
+            == "Sturmböen, ab 15:00 bis Di 04:00. Außerdem: Regen 13:25, Gassi 17–22.")
+        let calm = Insight.rank(InsightTests.forecast(temps: Array(repeating: 8, count: 24)), at: InsightTests.start)
+        #expect(Briefing.sentence(calm, mode: .calm, night: nil) == "Bewölkt, kein Regen in Sicht · 2° bis 8°.")
+        #expect(Outfit.tip(forecast, at: InsightTests.start, insights: insights) == "Warme Jacke, Schirm")
+    }
+
+    @Test func forecastShift() {
+        let base = InsightTests.start.addingTimeInterval(-5 * 3600)
+        var precip = Array(repeating: 0.0, count: 24)
+        precip[2] = 0.8 // 15 Uhr MEZ
+        let forecast = InsightTests.forecast(temps: Array(repeating: 8, count: 24), precip: precip)
+        let earlier = ForecastDigest(generatedAt: base, firstRain: InsightTests.start.addingTimeInterval(5 * 3600), dailyMax: [:])
+        let shift = Insight.rank(forecast, at: InsightTests.start, baseline: earlier).first { $0.kind == .shift }
+        #expect(shift?.title == "Regen früher: ab 15 Uhr")
+        #expect(shift?.detail == "vorher ab 18 Uhr angesagt")
+        #expect(shift?.reason == "Vergleich mit der Vorhersage von 08:00")
+        let dry = ForecastDigest(generatedAt: base, firstRain: nil, dailyMax: [:])
+        #expect(Insight.rank(forecast, at: InsightTests.start, baseline: dry).first { $0.kind == .shift }?.title == "Regen neu: ab 15 Uhr")
+        let rainy = ForecastDigest(generatedAt: base, firstRain: InsightTests.start.addingTimeInterval(3600), dailyMax: [:])
+        let none = InsightTests.forecast(temps: Array(repeating: 8, count: 24))
+        #expect(Insight.rank(none, at: InsightTests.start, baseline: rainy).first { $0.kind == .shift }?.title == "Regen fällt aus")
+        // Morgen wärmer als angesagt.
+        let warmer = ForecastDigest(generatedAt: base, firstRain: nil, dailyMax: ["2026-11-10": 4])
+        #expect(Insight.rank(none, at: InsightTests.start, baseline: warmer).first { $0.kind == .shift }?.title
+            == "Morgen 4° wärmer als angesagt")
+    }
+
+    @Test func digestHistory() {
+        let t = InsightTests.start
+        let d = { (h: Double) in ForecastDigest(generatedAt: t.addingTimeInterval(h * 3600), firstRain: nil, dailyMax: [:]) }
+        var history: [ForecastDigest] = []
+        for h in [-20.0, -10, -9.5, -4, -1] { history = ForecastDigest.appending(d(h), to: history) }
+        #expect(history.count == 4) // -9,5 h kam zu früh nach -10 h
+        #expect(ForecastDigest.baseline(in: history, now: t) == d(-4))
+        #expect(ForecastDigest.baseline(in: [d(-20), d(-1)], now: t) == nil)
     }
 }
