@@ -42,7 +42,7 @@ extension WidgetFamily {
     }
 }
 
-private struct PlaceTitle: View {
+struct PlaceTitle: View {
     let s: WeatherSnapshot
     var body: some View {
         HStack(spacing: Spacing.xs) {
@@ -53,7 +53,7 @@ private struct PlaceTitle: View {
     }
 }
 
-private struct MinMax: View {
+struct MinMax: View {
     let s: WeatherSnapshot
     var body: some View {
         if let min = s.min, let max = s.max {
@@ -82,7 +82,7 @@ private struct SmallView: View {
     }
 }
 
-private struct HoursRow: View {
+struct HoursRow: View {
     let hours: [WeatherSnapshot.Hour]
     var body: some View {
         HStack(spacing: 0) {
@@ -135,7 +135,7 @@ private struct MediumView: View {
 
 /// WeatherKit verlangt die Marke überall, wo Apple-Daten erscheinen; der Link
 /// steht in der App (Tipp aufs Widget öffnet sie).
-private struct WeatherMark: View {
+struct WeatherMark: View {
     var body: some View {
         Text("\u{F8FF}Weather · Daten verändert").font(.system(size: 9, weight: .medium)).opacity(0.7)
     }
@@ -147,32 +147,8 @@ private struct LargeView: View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             MediumView(s: s).frame(height: 138)
             Divider().overlay(.white.opacity(0.4))
-            let low = s.days.map(\.min).min() ?? 0
-            let high = s.days.map(\.max).max() ?? 10
-            // Tageszeilen teilen sich die restliche Höhe, statt oben zu kleben und
-            // unten eine leere Fläche zu lassen.
-            VStack(spacing: 0) {
-                ForEach(s.days, id: \.self) { day in
-                    HStack(spacing: Spacing.s) {
-                        Text(Fmt.weekday(day.date, now: s.date)).font(.subheadline.weight(.medium)).frame(width: 46, alignment: .leading)
-                        Image(systemName: day.symbol).symbolRenderingMode(.multicolor).frame(width: 26)
-                        Text(Fmt.temp(day.min)).font(.subheadline).opacity(0.75).frame(width: 30, alignment: .trailing)
-                        GeometryReader { geo in
-                            let span = max(1, high - low)
-                            Capsule().fill(.white.opacity(0.2))
-                                .overlay(alignment: .leading) {
-                                    Capsule().fill(LinearGradient(colors: [.cyan, .yellow], startPoint: .leading, endPoint: .trailing))
-                                        .frame(width: max(6, (day.max - day.min) / span * geo.size.width))
-                                        .offset(x: (day.min - low) / span * geo.size.width)
-                                }
-                        }
-                        .frame(height: 5)
-                        Text(Fmt.temp(day.max)).font(.subheadline).frame(width: 30, alignment: .leading)
-                    }
-                    .frame(maxHeight: .infinity)
-                }
-            }
-            .frame(maxHeight: .infinity)
+            DayRangeRows(days: Array(s.days.prefix(5)), now: s.date)
+                .frame(maxHeight: .infinity)
         }
         .foregroundStyle(.white)
     }

@@ -55,10 +55,12 @@ starten (der Versuch zählt mit). Für eine neue Version `MARKETING_VERSION` erh
 
 ### Tests
 
-19 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
+41 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
 (Uelzen im November, Warnungen, Regen in 25 min, eine Quelle mit Kontingentfehler),
 PKCE-Testvektor aus RFC 7636 Anhang B, Nowcast-Sätze, Regenhinweis und stündliche
-Widget-Timeline, WMS-BBOX-Rechnung, deutsche Zahlen- und Zeitformate.
+Widget-Timeline, WMS-BBOX-Rechnung, deutsche Zahlen- und Zeitformate, dazu
+`InsightTests` für jede Regel von „Im Blick“, die Gewichte gegeneinander und die
+Kartenreihenfolge, `DecisionTests` für Jevs Umordnung (Schwelle, Leitplanke, stabile Anfrage).
 
 Das Testbundle läuft ohne Host-App. Hängt `xcodebuild test` mit „The test runner hung
 before establishing connection“ (auf dem Entwicklungsrechner am 09.11.2026 so, der
@@ -94,7 +96,7 @@ Nur in Debug-Builds gibt es Startargumente für Screenshots ohne UI-Automation:
 | `-page 1` | Seite wählen (0 = Mein Standort) |
 | `-scrollTo hourly\|daily\|details` | zu einem Abschnitt springen |
 | `-screen radar\|places\|settings\|comparison\|days\|attribution` | Ansicht öffnen |
-| `-widgetGallery top\|large` | Widget-Ansichten in Originalgröße |
+| `-widgetGallery top\|large\|focus\|hourly\|daily` | Widget-Ansichten in Originalgröße (Wetter bzw. die Art) |
 
 ```fish
 xcrun simctl location booted set 52.9656,10.5594
@@ -114,7 +116,9 @@ ios/
 │   ├── Weather.swift     Bedingungen (Text, SF Symbol), Nowcast-Satz, Regenhinweis, Widget-Snapshot
 │   ├── Formatting.swift  deutsche Zahlen, Zeiten, Alter, Himmelsrichtung
 │   ├── Theme.swift       Verläufe je Wetterlage und Tag/Nacht, DWD-Warnfarben
-│   └── WidgetViews.swift Widget-Ansichten (auch für die Debug-Galerie)
+│   ├── Insight.swift     „Im Blick“: Hinweise mit Gewicht und Grund, Kartenreihenfolge
+│   ├── WidgetViews.swift Wetter-Widget (auch für die Debug-Galerie)
+│   └── WidgetStyles.swift Widget-Arten Im Blick, Stunden, Tage und ihre Bausteine
 ├── App/               SwiftUI-App
 │   ├── AppModel.swift    Zustand: Orte, Vorhersagen, Anmeldung, Server
 │   ├── Auth.swift        PKCE (S256) und Geräte-Anmeldung
@@ -158,7 +162,59 @@ Regenhinweis), Tipp → Ortsseite mit Temperatur, Warnungen (Tipp → voller Tex
 weil die Watch keinen Konfigurationsdialog hat, bietet `recommendations()` jeden Ort als
 eigene Komplikation an.
 
-**Widgets.** Klein, mittel, groß, Sperrbildschirm rund, rechteckig und einzeilig. Ort per
+**Widgets.** Vier Arten, alle mit derselben Ortswahl und demselben Provider
+(`Shared/WidgetStyles.swift`):
+
+| Art | Größen (iPhone) | Watch | Inhalt |
+|---|---|---|---|
+| Wetter | klein, mittel, groß, rund, rechteckig, einzeilig | rund, rechteckig, einzeilig, Ecke | Temperatur, Lage, Regenhinweis, Stunden, 5 Tage |
+| Im Blick | klein, mittel, groß, rund, rechteckig, einzeilig | rund, rechteckig, einzeilig, Ecke | das Wichtigste gerade, mit Grund |
+| Stunden | klein, mittel, groß, rechteckig | rechteckig | Temperaturkurve mit Regenbalken, 12 bzw. 24 h |
+| Tage | klein, mittel, groß, rechteckig | rechteckig | 4–10 Tage, groß mit Balken und Regenmenge |
+
+**Im Blick** entscheidet selbst, was es zeigt (`Shared/Insight.swift`, `Insight.rank`): Jede
+Regel liefert höchstens einen Hinweis mit Gewicht (0–1), Titel, Detail und Entscheidungsgrund,
+der Hinweis mit dem höchsten Gewicht steht vorn.
+
+| Hinweis | Wann | Gewicht |
+|---|---|---|
+| DWD-Warnung | aktiv oder Beginn in < 12 h | 0,55 gelb · 0,8 orange · 0,92 rot · 1,0 violett; −0,1 bei Beginn in > 3 h |
+| Regen bald (Radar) | Nowcast meldet Beginn | 0,8 in 0 min bis 0,6 ab 60 min, +0,05 bei Starkregen |
+| Regen jetzt (Radar) | es regnet laut Nowcast | 0,7–0,85 |
+| Gewitter | Lage `thunderstorm` in 12 h | 0,65, in < 3 h 0,75 |
+| Glätte | Niederschlag bei ≤ 1° in 18 h | 0,7 |
+| Sturm | Böe ≥ 50/60/75 km/h in 12 h | 0,35/0,55/0,7 |
+| Schnee, Regen später | erste nasse Stunde nach dem Radar, 12 h | 0,3–0,6 (+0,1 Schnee, ×0,8 wenn < 50 % der Quellen) |
+| Hitze | Höchstwert ≥ 25°/30° heute oder morgen | 0,3/0,6 |
+| Frost | Tiefstwert < 0,5° in 18 h | 0,45, „möglich“ 0,35, ≤ −5° 0,55 |
+| Gassi-Fenster | regnet es in 12 h: erste trockene Lücke ≥ 2 h zwischen 6 und 22 Uhr | 0,42 |
+| Umschwung | morgen ≥ 5° wärmer/kälter | 0,38–0,5 |
+| Quellen uneinig | Temperatur-Spannbreite ≥ 5° oder 30–70 % Regen-Einigkeit | 0,25 |
+| Ruhiges Wetter | nichts davon | – |
+
+Was eine amtliche Warnung schon abdeckt (Sturm, Frost, Glätte, Gewitter …), bekommt keinen
+eigenen Hinweis.
+
+**Jev entscheidet die Reihenfolge.** Sind es mindestens zwei Hinweise, fragt App bzw. Widget
+über den Server [Jev](https://docs.typesafe.ai), das Entscheidungsmodell von TypeSafe
+(`Shared/Decision.swift`, `Shared/JevClient.swift`, Server `POST /api/v1/decide`). Jev bekommt
+die Lage (Temperatur, Radar-Satz, Warnungen, 12 Stunden) und die Hinweise als Optionen und gibt
+jedem eine Wahrscheinlichkeit. Übernommen wird das nur bei Konfidenz ≥ 0,5 und wenn Jev über
+genau die aktuellen Hinweise entschieden hat; rote und violette Warnungen bleiben immer vorn.
+Der Grund zeigt dann „· Jev 84 %“. Ohne Schlüssel auf dem Server, offline oder bei Fehlern
+gilt die Reihenfolge der Regeln (bzw. die letzte passende Jev-Antwort aus dem Cache).
+Die Gewichte unten sind also die Rückfallebene. Neben dem Hinweis zeigt das Widget, was ihn erklärt: Radarbalken bei Regen,
+die Tage bei Hitze und Umschwung, sonst den Stundenverlauf. Die Timeline ist dichter (in den
+ersten zwei Stunden alle 15 min), das Gewicht geht als `TimelineEntryRelevance` an den Smart
+Stack, und steht Warnung oder Radar-Regen vorn, lädt das Widget nach 15 statt 30 min neu.
+
+**Dynamische Ortsseite.** Dieselben Hinweise ordnen die Karten (`PlaceSection.order`):
+Warnungen immer oben, dann bei Regen das Radar vor allem anderen, bei Umschwung oder Hitze die
+10 Tage vor den Stunden, bei Sturm die Messwerte (Wind) nach oben, bei uneinigen Quellen der
+Quellenvergleich. Die Karte „Im Blick“ zeigt bis zu drei Hinweise mit Grund (ohne Warnungen und
+Radar-Regen, die ihre eigenen Karten haben); ist nichts los, steht dort eine Zeile „Ruhiges Wetter“.
+
+Gemeinsam für alle Widgets: klein, mittel, groß, Sperrbildschirm rund, rechteckig und einzeilig. Ort per
 App Intent: gespeicherter Ort oder „Mein Standort“ (eigener Standort des Widgets, sonst der
 letzte aus der App). Der Provider lädt selbst (Server-URL aus der App Group, Token aus der
 gemeinsamen Schlüsselbundgruppe), legt das Ergebnis in den Cache und baut acht Einträge:

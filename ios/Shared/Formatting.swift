@@ -45,6 +45,16 @@ enum Fmt {
         "\(calendar.component(.hour, from: date)) Uhr"
     }
 
+    /// „14–16 Uhr“; endet die Spanne nach Mitternacht, steht dort „0 Uhr“.
+    static func hourRange(_ start: Date, _ end: Date) -> String {
+        "\(calendar.component(.hour, from: start))–\(calendar.component(.hour, from: end)) Uhr"
+    }
+
+    /// „15:00“ heute, sonst „Di 04:00“.
+    static func dayTime(_ date: Date, now: Date = .now) -> String {
+        calendar.isDate(date, inSameDayAs: now) ? time(date) : "\(weekday(dayString(date), now: now)) \(time(date))"
+    }
+
     /// „Mo“, „Di“ … bzw. „Heute“ für den Tag von `now`.
     static func weekday(_ dateString: String, now: Date = .now) -> String {
         guard let date = day(dateString) else { return dateString }

@@ -75,7 +75,8 @@ struct NowcastTests {
         #expect(entries[0].temp == 7.5) // Beobachtung, 20 min alt
         #expect(entries[3].temp == forecast.hourly[3].consensus.tempC)
         #expect(entries[0].min == forecast.daily[0].consensus.tempMinC)
-        #expect(entries[0].hours.count == 6)
+        #expect(entries[0].hours.count == 24)
+        #expect(entries[0].days.count == 10)
         // Nach dem letzten Stundenwert gibt es keine Einträge mit alten Werten.
         #expect(WeatherSnapshot.timeline(forecast, now: Self.start.addingTimeInterval(49 * 3600)).isEmpty)
     }

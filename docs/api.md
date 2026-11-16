@@ -109,6 +109,32 @@ danach Vorhersage. Zeitschritte
 (5 min) von −2 h bis +2 h (Vorhersage), für WMS-`TIME`. Kacheln holt der Client direkt beim
 DWD (EPSG:3857, `FORMAT=image/png`, `TRANSPARENT=true`). Quelle: Deutscher Wetterdienst.
 
+## Entscheidung (Jev)
+
+`POST /api/v1/decide` lässt [Jev](https://docs.typesafe.ai), das Entscheidungsmodell von
+TypeSafe, wählen, welcher Hinweis gerade am wichtigsten ist (Widget „Im Blick“, Karte „Im
+Blick“ in der App). Die App findet die Hinweise mit festen Regeln (`ios/Shared/Insight.swift`),
+Jev ordnet sie nur; es schreibt keinen Text.
+
+```json
+{"state": {"place": "Uelzen", "localTime": "Mo 13:00", "tempC": 8, "radar": "Regen in 25 Minuten",
+           "alerts": [...], "nextHours": [...]},
+ "options": {"rainSoon": "Regen in 25 Minuten. ab 13:25 … Grund: Regenradar des DWD",
+             "walk": "Gassi-Fenster 17–22 Uhr. … Grund: Längste trockene Lücke …"}}
+```
+
+→ `{"choice": "rainSoon", "probabilities": {"rainSoon": 0.84, "walk": 0.16}, "confidence": 0.75,
+"model": "jev-1.13.0"}`
+
+Der Server stellt die Frage selbst (eine `choice`-Frage mit festem Text), die App liefert nur
+Lage und Optionen: 2–12 Optionen, Schlüssel aus Buchstaben/Ziffern (≤ 24), Texte ≤ 300
+Zeichen, `state` ≤ 8 KB. Gleiche Anfrage → Antwort aus dem Cache (30 min, im Speicher). Die App
+rundet die Lage auf die Viertelstunde, damit Widget-Neuladungen den Cache treffen.
+Fehler: `503 unavailable` ohne `WITTERUNG_JEV_KEY`, `502 upstream`, wenn Jev nicht antwortet.
+Die App übernimmt Jevs Reihenfolge nur bei `confidence` ≥ 0,5 und wenn Jev über genau die
+aktuellen Hinweise entschieden hat; rote und violette DWD-Warnungen bleiben immer vorn.
+Sonst gilt die Reihenfolge der Regeln.
+
 ## Status
 
 `GET /health` (öffentlich): `{"status":"ok","version","sources":[{"provider","configured",

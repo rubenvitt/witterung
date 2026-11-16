@@ -14,6 +14,8 @@ final class AppModel {
     private(set) var loading: Set<PlaceRef> = []
     /// Zählt erfolgreiche manuelle Aktualisierungen (Haptik).
     private(set) var refreshTick = 0
+    /// Reihenfolge der Hinweise laut Jev (Decision.swift), je Ort.
+    private(set) var decisions: [PlaceRef: JevDecision] = [:]
     private(set) var serverURL = SharedStore.serverURL
     private(set) var signedIn = !API.needsAuth(SharedStore.serverURL) || TokenStore.token != nil
     var message: String?
@@ -24,6 +26,7 @@ final class AppModel {
     init() {
         for ref in [PlaceRef.current] + places.map({ .saved($0.id) }) {
             if let cached = ForecastCache.load(ref) { forecasts[ref] = cached }
+            if let cached = DecisionCache.load(ref) { decisions[ref] = cached }
         }
         selection = pages.first
     }
@@ -100,6 +103,7 @@ final class AppModel {
             forecasts[ref] = forecast
             failures[ref] = nil
             ForecastCache.store(data, for: ref)
+            decisions[ref] = await JevClient.decide(forecast, ref: ref, placeName: title(ref), at: .now, api: api)
             if manual {
                 refreshTick += 1
                 WidgetCenter.shared.reloadAllTimelines()

@@ -6,6 +6,7 @@ pub mod auth;
 pub mod backup;
 pub mod config;
 pub mod db;
+pub mod decide;
 pub mod error;
 pub mod forecast;
 pub mod healthcheck;
@@ -48,6 +49,7 @@ pub fn build(config: Config, http: reqwest::Client) -> anyhow::Result<(App, Rout
         .route("/api/v1/forecast", get(api::location_forecast))
         .route("/api/v1/status", get(api::status))
         .route("/api/v1/radar", get(api::radar))
+        .route("/api/v1/decide", axum::routing::post(decide::decide))
         .route(
             "/api/v1/devices",
             get(api::list_devices).post(api::create_device),
