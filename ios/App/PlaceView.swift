@@ -24,15 +24,20 @@ struct PlaceView: View {
                     // die Regeln finden die Hinweise, Jev wägt ab (Insight.swift, Decision.swift).
                     let now = Date.now
                     let decision = model.decisions[ref]
-                    let insights = Insight.ranked(forecast, at: now, baseline: model.baselines[ref], decision: decision)
-                    let mode = WidgetMode.decide(insights, at: now, decision: decision)
+                    let insights = Insight.ranked(forecast, at: now, baseline: model.baselines[ref], events: model.events,
+                                                  habits: model.habits, decision: decision)
+                    let mode = WidgetMode.decide(insights, at: now, decision: decision, habits: model.habits)
                     let night = NightOutlook.make(forecast, at: now)
                     HeaderView(title: model.title(ref), isCurrent: ref == .current, forecast: forecast,
                                briefing: Briefing.sentence(insights, mode: mode, night: night))
                     FreshnessBadge(forecast: forecast, failure: model.failures[ref], loading: model.loading.contains(ref))
-                    ForEach(PlaceSection.order(for: insights, decision: decision, at: now), id: \.self) { section in
+                    ForEach(PlaceSection.order(for: insights, decision: decision, at: now, habits: model.habits), id: \.self) { section in
                         card(section, forecast: forecast, insights: insights, mode: mode, night: night, now: now)
                             .id(section.rawValue)
+                            // Merkt sich, welche Karten angetippt werden (Lernen aus der Nutzung).
+                            .simultaneousGesture(TapGesture().onEnded {
+                                model.recordUse(kind: section == .focus ? insights.first?.kind.rawValue : nil, section: section.rawValue)
+                            })
                     }
                     AttributionFooter(forecast: forecast, ref: ref)
                 } else {
@@ -45,8 +50,9 @@ struct PlaceView: View {
         }
         .scrollIndicators(.hidden)
         .animation(.snappy, value: forecast.map {
-            PlaceSection.order(for: Insight.ranked($0, at: .now, baseline: model.baselines[ref], decision: model.decisions[ref]),
-                               decision: model.decisions[ref])
+            PlaceSection.order(for: Insight.ranked($0, at: .now, baseline: model.baselines[ref], events: model.events,
+                                                   habits: model.habits, decision: model.decisions[ref]),
+                               decision: model.decisions[ref], habits: model.habits)
         })
         #if DEBUG
         .task(id: forecast == nil) {

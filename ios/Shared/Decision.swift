@@ -60,8 +60,10 @@ extension Insight {
     }
 
     /// Hinweise mit allem, was Jev entschieden hat: Gassi-Fenster und Reihenfolge.
-    static func ranked(_ forecast: Forecast, at now: Date, baseline: ForecastDigest? = nil, decision: JevDecision? = nil) -> [Insight] {
-        rank(forecast, at: now, baseline: baseline, window: decision?.windowChoice).ordered(by: decision?.focus)
+    static func ranked(_ forecast: Forecast, at now: Date, baseline: ForecastDigest? = nil, events: [CalendarEvent] = [],
+                       habits: UsageStats? = nil, decision: JevDecision? = nil) -> [Insight] {
+        rank(forecast, at: now, baseline: baseline, events: events, habits: habits, window: decision?.windowChoice)
+            .ordered(by: decision?.focus)
     }
 }
 
@@ -98,8 +100,8 @@ enum WidgetMode: String, Codable, Sendable, CaseIterable {
     case calm
 
     /// Jev, wenn sicher genug; sonst die Regeln. Rote und violette Warnungen erzwingen den Hinweis.
-    static func decide(_ insights: [Insight], at now: Date, decision: JevDecision?) -> WidgetMode {
-        jevChoice(insights, decision: decision) ?? rules(insights, at: now)
+    static func decide(_ insights: [Insight], at now: Date, decision: JevDecision?, habits: UsageStats? = nil) -> WidgetMode {
+        jevChoice(insights, decision: decision) ?? rules(insights, at: now, habits: habits)
     }
 
     /// Die Ansicht, die Jev gewählt hat, falls sie gilt.
@@ -119,12 +121,16 @@ enum WidgetMode: String, Codable, Sendable, CaseIterable {
         }
     }
 
-    /// Ohne Jev: Wichtiges groß; ist nichts los, abends die Nacht, tagsüber die Übersicht.
-    static func rules(_ insights: [Insight], at now: Date) -> WidgetMode {
+    /// Ohne Jev: Wichtiges groß; ist nichts los, abends die Nacht, tagsüber die Übersicht –
+    /// oder Stunden bzw. Tage, wenn die Person diese Ansicht am häufigsten öffnet.
+    static func rules(_ insights: [Insight], at now: Date, habits: UsageStats? = nil) -> WidgetMode {
         let hour = Fmt.calendar.component(.hour, from: now)
         let evening = hour >= 18 || hour < 5
         guard let top = insights.first else { return .calm }
-        if top.kind == .calm { return evening ? .tonight : .calm }
+        if top.kind == .calm {
+            if evening { return .tonight }
+            return habits?.favoriteMode.flatMap { [.hours, .days].contains($0) ? $0 : nil } ?? .calm
+        }
         if top.isUrgent || top.score >= 0.5 { return .hint }
         if evening, [.frost, .ice, .snow, .walk].contains(top.kind) { return .tonight }
         if top.visual == .days { return .days }
@@ -155,8 +161,8 @@ enum Urgency {
 
 extension PlaceSection {
     /// Warnungen immer zuerst, danach Jevs Reihenfolge, wenn sicher genug, sonst die Regeln.
-    static func order(for insights: [Insight], decision: JevDecision?, at now: Date = .now) -> [PlaceSection] {
-        let rules = order(for: insights, at: now)
+    static func order(for insights: [Insight], decision: JevDecision?, at now: Date = .now, habits: UsageStats? = nil) -> [PlaceSection] {
+        let rules = order(for: insights, at: now, habits: habits)
         guard let sections = decision?.sections, sections.isConfident else { return rules }
         let rest = rules.filter { $0 != .alerts }.enumerated().sorted { a, b in
             let pa = sections.probabilities[a.element.rawValue] ?? 0
@@ -199,6 +205,8 @@ struct DecisionRequest: Encodable, Sendable, Equatable {
         let tomorrow: String?
         let tonight: String?
         let nextHours: [Hour]
+        /// Vorlieben aus der Nutzung („Öffnet oft: Stundenverlauf“), ohne Einzelheiten.
+        let habits: String?
     }
 
     let state: State
@@ -212,9 +220,10 @@ struct DecisionRequest: Encodable, Sendable, Equatable {
 
     /// Hinweise und Lage gelten für die Viertelstunde von `now`, damit die Texte („Regen in
     /// 25 Minuten“) stehen bleiben.
-    static func make(_ forecast: Forecast, placeName: String, at now: Date, baseline: ForecastDigest? = nil) -> DecisionRequest {
+    static func make(_ forecast: Forecast, placeName: String, at now: Date, baseline: ForecastDigest? = nil,
+                     events: [CalendarEvent] = [], habits: UsageStats? = nil) -> DecisionRequest {
         let rounded = rounded(now)
-        let insights = Insight.rank(forecast, at: rounded, baseline: baseline)
+        let insights = Insight.rank(forecast, at: rounded, baseline: baseline, events: events, habits: habits)
         let current = forecast.hour(at: now)?.consensus ?? forecast.now.forecast
         let observed = forecast.now.observed.flatMap { now.timeIntervalSince($0.at) < 90 * 60 ? $0 : nil }
         let isDay = current?.isDay ?? true
@@ -242,9 +251,10 @@ struct DecisionRequest: Encodable, Sendable, Equatable {
                 return Hour(time: Fmt.hour($0.at), tempC: Int(c.tempC.rounded()), precipMm: (c.precipMm * 10).rounded() / 10,
                             precipProbPct: c.precipProbPct.map { Int($0.rounded()) }, gustKmh: c.gustKmh.map { Int($0.rounded()) },
                             condition: c.condition.label(isDay: c.isDay ?? true))
-            })
+            },
+            habits: habits?.summary)
         let options = Dictionary(insights.map { insight in
-            (insight.kind.rawValue, String("\(insight.title). \(insight.detail). Grund: \(insight.reason)".prefix(300)))
+            (insight.kind.rawValue, String((insight.jevText ?? "\(insight.title). \(insight.detail). Grund: \(insight.reason)").prefix(300)))
         }, uniquingKeysWith: { first, _ in first })
         let windows = Dictionary(Insight.walkWindows(forecast, at: rounded).map { ($0.id, $0.summary) },
                                  uniquingKeysWith: { first, _ in first })

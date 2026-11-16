@@ -43,6 +43,30 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    Toggle("Kalender einbeziehen", isOn: Binding(
+                        get: { model.calendarEnabled },
+                        set: { enabled in Task { await model.setCalendarEnabled(enabled) } }))
+                } header: {
+                    Text("Termine")
+                } footer: {
+                    Text("Termine mit Ort oder draußen (z. B. Hundeschule, Training) der nächsten 36 Stunden bekommen Hinweise wie „Regen zu …“. Termine bleiben auf dem Gerät; Jev sieht nur „Termin draußen um 15:00“, nie den Namen.")
+                }
+
+                Section {
+                    if let summary = model.habits.summary {
+                        Text(summary).font(.subheadline)
+                    } else {
+                        Text("Noch keine Vorlieben – Witterung lernt aus deinen Taps auf Karten und „Im Blick“.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Button("Vorlieben zurücksetzen", role: .destructive) { model.resetHabits() }
+                } header: {
+                    Text("Gelernt")
+                } footer: {
+                    Text("Häufig Angetipptes rückt etwas nach vorn. Verblasst nach einigen Wochen und bleibt auf dem Gerät; Jev bekommt nur die Kurzfassung oben.")
+                }
+
                 Section("Info") {
                     LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")
                     LabeledContent("Einheiten", value: "°C, mm, km/h, hPa")
