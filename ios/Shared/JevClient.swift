@@ -23,7 +23,8 @@ enum JevClient {
 extension API {
     func decide(_ request: DecisionRequest) async throws -> JevDecision {
         let body = try JSONEncoder().encode(request)
-        return try JSONDecoder().decode(JevDecision.self, from: send("POST", "/api/v1/decide", body: body))
+        let data = try await send("POST", "/api/v1/decide", body: body)
+        return try JSONDecoder().decode(JevDecision.self, from: data)
     }
 }
 
