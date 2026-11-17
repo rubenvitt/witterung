@@ -192,8 +192,8 @@ Was gezeigt wird, prüft der Server nach jeder Poll-Runde (`server/src/live.rs`)
 
 Start je Ereignis nur einmal (Warnung: je ID, Regen: höchstens alle 2 Stunden), auch wenn die
 Aktivität weggewischt wird. Updates bei anderem Zustand oder anderer Warnung (Priorität 10,
-mit Hinweis), bei ≥ 5 min verschobenem Beginn/Ende, anderer Regenstärke, weitergerückten oder
-anders hohen Balken und spätestens
+mit Hinweis), bei ≥ 5 min verschobenem Beginn/Ende, anderer Regenstärke, weitergerücktem oder
+geändertem Diagramm und spätestens
 alle 20 min, damit sie nicht veraltet (Priorität 5). Ende, sobald nichts mehr ansteht oder die
 erste Seite einen anderen Ort zeigt. Ungültige Token (`410`, `BadDeviceToken` …) vergisst der
 Server.
@@ -202,11 +202,12 @@ Server.
 
 ```json
 {"kind": "rain_soon", "startsAt": 1794226680, "endsAt": 1794227400, "peakMmH": 3.0,
- "updatedAt": 1794225600, "bars": [0, 0, 0.3, 1.2, 3.0, 0.4, 0, 0, 0, 0, 0, 0],
- "barsStart": 1794225600}
+ "updatedAt": 1794225600, "series": [0, 0, 0.3, 1.2, 3.0, 0.4, 0, 0],
+ "seriesStart": 1794225600}
 ```
 
-`bars`: Radar ab dem laufenden 5-min-Schritt, eine Stunde (mm/h), `barsStart` dessen Beginn.
+`series`: Radar ab dem laufenden 5-min-Schritt bis zum Ende des Nowcasts (mm/h, höchstens 2 h),
+`seriesStart` der Zeitpunkt des ersten Werts.
 `dryAt`: regnet es über das Radar hinaus, die erste trockene Stunde laut Konsens (höchstens 12 h).
 Fehlende Werte lässt der Server weg.
 

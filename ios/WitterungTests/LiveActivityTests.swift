@@ -23,9 +23,9 @@ struct LiveActivityTests {
         #expect(soon.countdownLabel == "Regen in")
         #expect(soon.title == "Regen ab 13:15")
         #expect(soon.detail() == "ab 13:15 bis 13:30, stark")
-        // Ab dem laufenden Schritt (12:00), eine Stunde lang, so viele wie das Radar hat.
-        #expect(soon.bars == [0, 0, 0, 0.3, 1.2, 5, 0, 0])
-        #expect(soon.barsStart == Self.start.timeIntervalSince1970)
+        // Ab dem laufenden Schritt (12:00) bis zum Ende des Radars.
+        #expect(soon.series == [0, 0, 0, 0.3, 1.2, 5, 0, 0])
+        #expect(soon.seriesStart == Self.start.timeIntervalSince1970)
 
         let raining = try #require(State.desired(alerts: [], nowcast: nowcast, now: Self.start.addingTimeInterval(22 * 60)))
         #expect(raining.kind == .raining)
@@ -55,7 +55,7 @@ struct LiveActivityTests {
         #expect(warning.severity == "extreme")
         #expect(warning.countdownTarget == nil)
         #expect(warning.title == "Orkanartige Böen")
-        #expect(warning.bars == nil)
+        #expect(warning.series == nil)
         #expect(warning.detail(now: Self.start) == "Extreme Unwetterwarnung · ab 13:30 · bis 15:30")
 
         #expect(State.desired(alerts: [Self.alert("f", .severe, inMinutes: 90)], nowcast: nil, now: Self.start) == nil)
@@ -69,7 +69,7 @@ struct LiveActivityTests {
         let state = try #require(State.desired(alerts: [], nowcast: forecast.nowcast, hourly: forecast.hourly, now: Self.start))
         #expect(state.kind == .raining)
         #expect(state.countdownTarget == nil)
-        #expect(state.bars?.count == State.barCount)
+        #expect(state.series?.count == State.seriesCount)
         #expect(state.title == "Regen bis ca. 17 Uhr")
         #expect(state.detail() == "jetzt mäßig, Ende laut Vorhersage")
 

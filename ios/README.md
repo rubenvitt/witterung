@@ -212,8 +212,8 @@ vorn steht, welche Ansicht das Widget zeigt, wie dringend die Lage ist (Smart St
 15/30/60 min), welche Karte auf der Ortsseite oben steht und welches Gassi-Fenster am besten ist.
 Jev bekommt dafür die Lage (Temperatur, Radar-Satz, Warnungen, Nacht, 12 Stunden), die Hinweise
 und die trockenen Fenster als Optionen. Übernommen wird nur bei Konfidenz ≥ 0,5; rote und violette
-Warnungen bleiben immer vorn. In der App zeigt ein ✨ an der Karte, dass Jev sie nach vorn geholt
-hat; in den Widgets steht nur der Grund, keine Prozentzahl. Ohne Schlüssel auf dem Server,
+Warnungen bleiben immer vorn. App und Widgets zeigen nur den Grund in Worten, nicht, ob Jev oder
+die Regeln entschieden haben. Ohne Schlüssel auf dem Server,
 offline oder bei Fehlern gelten die Regeln (bzw. die letzte Jev-Antwort aus dem Cache). Die
 Gewichte unten sind also die Rückfallebene. Auch Push-Nachrichten prüft der Server vorher mit Jev.
 
@@ -253,10 +253,9 @@ dem Sperrbildschirm und in der Dynamic Island, was in der nächsten Stunde anste
 - **Unwetter**: DWD-Warnung ab Stufe 3 (rot, violett), die läuft oder binnen 60 min beginnt,
   in der Farbe der Warnstufe mit „ab“/„bis“. Sie geht dem Regen vor.
 
-Bei Regen zeigen zwölf Balken das Radar der nächsten Stunde (5-min-Schritte, Wurzelskala bis
-8 mm/h, trockene Schritte flach), darunter die Uhrzeiten und „DWD“ als Quelle. Der Server
-schickt neue Balken, wenn sie weiterrücken oder ein neuer Radarlauf sie ändert (Priorität 5,
-ohne Budget).
+Bei Regen zeigt ein Diagramm die Regenmenge der nächsten zwei Stunden (Radar in 5-min-Schritten,
+Wurzelskala bis 8 mm/h) mit Uhrzeiten alle 30 Minuten. Der Server schickt neue Werte, wenn das
+Diagramm weiterrückt oder ein neuer Radarlauf es ändert (Priorität 5, ohne Budget).
 
 Steuern kann sie der Server oder die App (`App/LiveActivityController.swift`). Hat der Server
 einen APNs-Schlüssel (siehe README im Hauptordner), meldet die App ihr Push-to-Start-Token und

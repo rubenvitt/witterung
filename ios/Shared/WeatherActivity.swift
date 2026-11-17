@@ -34,10 +34,10 @@ struct WeatherActivityAttributes: ActivityAttributes {
         var severity: String?
         /// Stand der Daten, Unix-Sekunden.
         var updatedAt: Double
-        /// Radar ab dem laufenden 5-min-Schritt, eine Stunde (mm/h); fehlt bei Warnungen.
-        var bars: [Double]?
-        /// Beginn des ersten Balkens, Unix-Sekunden.
-        var barsStart: Double?
+        /// Radar ab dem laufenden 5-min-Schritt bis zum Ende des Nowcasts (mm/h, höchstens 2 h) fürs Diagramm; fehlt bei Warnungen.
+        var series: [Double]?
+        /// Zeitpunkt des ersten Werts, Unix-Sekunden.
+        var seriesStart: Double?
         /// Regnet es über das Radar hinaus: erste trockene Stunde laut Konsens.
         var dryAt: Double?
 
@@ -58,8 +58,8 @@ extension WeatherActivityAttributes.ContentState {
 
     /// Was die Aktivität jetzt zeigen soll; `nil` = keine. Gleiche Regeln wie
     /// `live::desired` auf dem Server: Unwetterwarnung vor Regen, Regen nur binnen einer Stunde.
-    /// So viele 5-min-Balken zeigt die Aktivität (eine Stunde).
-    static let barCount = 12
+    /// So viele 5-min-Werte zeigt das Diagramm (zwei Stunden, so weit das Radar reicht).
+    static let seriesCount = 24
 
     static func desired(alerts: [WeatherAlert], nowcast: Nowcast?, hourly: [HourRow] = [], now: Date) -> Self? {
         let warning = alerts
@@ -68,7 +68,7 @@ extension WeatherActivityAttributes.ContentState {
         if let a = warning {
             return Self(kind: .warning, startsAt: a.onset.timeIntervalSince1970, endsAt: a.expires?.timeIntervalSince1970,
                         peakMmH: 0, event: a.event, severity: a.severity.rawValue, updatedAt: now.timeIntervalSince1970,
-                        bars: nil, barsStart: nil, dryAt: nil)
+                        series: nil, seriesStart: nil, dryAt: nil)
         }
         let points = nowcast?.points ?? []
         // Der Schritt, in dem `now` liegt, und alle danach.
@@ -100,8 +100,8 @@ extension WeatherActivityAttributes.ContentState {
         return Self(kind: kind, startsAt: points[first].at.timeIntervalSince1970,
                     endsAt: end.map { points[$0].at.timeIntervalSince1970 },
                     peakMmH: round(peak), event: nil, severity: nil, updatedAt: now.timeIntervalSince1970,
-                    bars: points[current...].prefix(barCount).map { round($0.precipMmH) },
-                    barsStart: points[current].at.timeIntervalSince1970, dryAt: dryAt)
+                    series: points[current...].prefix(seriesCount).map { round($0.precipMmH) },
+                    seriesStart: points[current].at.timeIntervalSince1970, dryAt: dryAt)
     }
 
     var alertSeverity: WeatherAlert.Severity? { severity.flatMap(WeatherAlert.Severity.init(rawValue:)) }

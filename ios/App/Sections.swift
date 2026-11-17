@@ -84,7 +84,6 @@ struct NowcastCard: View {
                             .font(.title3.weight(.semibold))
                         NowcastChart(points: nowcast.points.filter { $0.at.addingTimeInterval(300) > context.date })
                             .frame(height: 110)
-                        Text("Radar: Deutscher Wetterdienst").font(.caption2).foregroundStyle(.white.opacity(0.6))
                     }
                 } else if let sentence = summary.sentence {
                     HStack(spacing: Spacing.s) {
