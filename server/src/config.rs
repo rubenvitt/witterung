@@ -60,6 +60,8 @@ pub struct Config {
     /// Source credentials (env or Docker secrets); a source without them is off.
     pub weatherkit: Option<WeatherKitConfig>,
     pub pirate_weather_key: Option<Secret>,
+    /// APNs for Live Activities; without it the app starts them itself (foreground only).
+    pub apns: Option<crate::live::ApnsConfig>,
     /// Jev decision model (TypeSafe); without a key `/api/v1/decide` answers 503.
     pub jev: Option<crate::decide::JevConfig>,
     /// Directory with the web app (`index.html`, `assets/`).
@@ -202,6 +204,29 @@ impl Config {
             }
         };
         let pirate_weather_key = secret("WITTERUNG_PIRATE_WEATHER_KEY")?.map(Secret);
+        let apns = match (
+            secret("WITTERUNG_APNS_KEY")?,
+            get("WITTERUNG_APNS_KEY_ID"),
+            get("WITTERUNG_APNS_TEAM_ID"),
+        ) {
+            (None, None, None) => None,
+            (Some(key_pem), Some(key_id), Some(team_id)) => {
+                let apns = crate::live::ApnsConfig {
+                    key_pem,
+                    key_id,
+                    team_id,
+                    topic: get("WITTERUNG_APNS_TOPIC")
+                        .unwrap_or_else(|| crate::live::DEFAULT_TOPIC.into()),
+                };
+                apns.validate().map_err(ConfigError)?;
+                Some(apns)
+            }
+            _ => {
+                return err(
+                    "APNs braucht WITTERUNG_APNS_KEY_FILE (oder _KEY), _KEY_ID und _TEAM_ID zusammen",
+                );
+            }
+        };
         let jev = match secret("WITTERUNG_JEV_KEY")? {
             None => None,
             Some(key) => {
@@ -228,6 +253,7 @@ impl Config {
             endpoints: Default::default(),
             weatherkit,
             pirate_weather_key,
+            apns,
             jev,
             web_dir: PathBuf::from(get("WITTERUNG_WEB_DIR").unwrap_or_else(|| "../web".into())),
         })
@@ -245,6 +271,7 @@ impl Config {
             endpoints: Default::default(),
             weatherkit: None,
             pirate_weather_key: None,
+            apns: None,
             jev: None,
             web_dir: PathBuf::from("../web"),
         }
@@ -345,6 +372,14 @@ mod tests {
         ])
         .is_err());
         assert!(cfg(&[("WITTERUNG_PIRATE_WEATHER_KEY_FILE", "/gibt/es/nicht")]).is_err());
+        // APNs: Schlüssel, Key-ID und Team zusammen; ein kaputter Schlüssel bricht ab.
+        assert!(cfg(&[("WITTERUNG_APNS_KEY_ID", "ABC")]).is_err());
+        assert!(cfg(&[
+            ("WITTERUNG_APNS_KEY", "kein-schlüssel"),
+            ("WITTERUNG_APNS_KEY_ID", "ABC"),
+            ("WITTERUNG_APNS_TEAM_ID", "T"),
+        ])
+        .is_err());
         let c = cfg(&[("WITTERUNG_PIRATE_WEATHER_KEY", "geheim")]).unwrap();
         assert!(!format!("{c:?}").contains("geheim"));
         let c = cfg(&[("WITTERUNG_JEV_KEY", "jev-geheim")]).unwrap();

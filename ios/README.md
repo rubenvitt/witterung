@@ -42,6 +42,8 @@ Für die Watch-App kommen zwei App-IDs dazu, ebenfalls mit der App Group
 `group.dev.rubeen.witterung`: `dev.rubeen.witterung.watchkitapp` und
 `dev.rubeen.witterung.watchkitapp.widgets` (Apple Developer → Identifiers → „+“ → App IDs,
 Capability „App Groups“ → Configure → die Gruppe wählen).
+Für Live-Aktivitäten per Server-Push braucht `dev.rubeen.witterung` zusätzlich die Capability
+„Push Notifications“ (ohne Zertifikat, der Server nutzt einen APNs-Schlüssel).
 Dazu im Repo unter Settings → Secrets and variables → Actions:
 
 | Secret | Inhalt |
@@ -55,7 +57,7 @@ starten (der Versuch zählt mit). Für eine neue Version `MARKETING_VERSION` erh
 
 ### Tests
 
-54 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
+59 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
 (Uelzen im November, Warnungen, Regen in 25 min, eine Quelle mit Kontingentfehler),
 PKCE-Testvektor aus RFC 7636 Anhang B, Nowcast-Sätze, Regenhinweis und stündliche
 Widget-Timeline, WMS-BBOX-Rechnung, deutsche Zahlen- und Zeitformate, dazu
@@ -63,7 +65,8 @@ Widget-Timeline, WMS-BBOX-Rechnung, deutsche Zahlen- und Zeitformate, dazu
 Kartenreihenfolge, `DecisionTests` für Jevs Entscheidungen (Schwelle, Leitplanken, Ansicht, Fenster, Karten, stabile
 Anfrage) `OutlookTests` für Kurztexte, Nacht, Kernsatz, Anzieh-Tipp und „Vorhersage geändert“ und
 `PersonalTests` für Termine (auch dass Jev keine Terminnamen sieht), Wochenende, goldene Stunde und
-gelernte Vorlieben.
+gelernte Vorlieben, `LiveActivityTests` für die Live-Aktivität (dieselben Regeln wie der Server,
+sein `content-state` dekodiert).
 
 Das Testbundle läuft ohne Host-App. Hängt `xcodebuild test` mit „The test runner hung
 before establishing connection“ (auf dem Entwicklungsrechner am 09.11.2026 so, der
@@ -239,12 +242,25 @@ zeigt das Widget die Lieblingsansicht (Stunden oder Tage). Jev bekommt nur die K
 („Öffnet oft: Stundenverlauf; achtet oft auf: Gassi-Fenster“). Ansehen und zurücksetzen unter
 Einstellungen → Gelernt.
 
-**Live-Aktivität „Regen in …“.** Zeigt das Radar Regenbeginn in höchstens 60 Minuten für die erste
-Seite (Standort, sonst der erste Ort), startet die App beim Laden eine Live-Aktivität mit Countdown
-auf dem Sperrbildschirm und in der Dynamic Island (`App/RainActivityController.swift`,
-`Widgets/RainActivityWidget.swift`); ab Regenbeginn steht dort „jetzt“. Ohne Push-Server geht das
-nur, solange die App im Vordergrund lädt; beendet wird die Aktivität beim nächsten Laden ohne Regen
-in Sicht (sonst vom System nach spätestens acht Stunden).
+**Live-Aktivitäten.** Für die erste Seite (Standort, sonst der erste Ort) zeigt Witterung auf
+dem Sperrbildschirm und in der Dynamic Island, was in der nächsten Stunde ansteht
+(`Shared/WeatherActivity.swift`, `Widgets/WeatherActivityWidget.swift`):
+
+- **Regen in …**: Radar sagt Regen binnen 60 min, Countdown bis Beginn, Stärke und Ende;
+- **Regen endet in …**: es regnet, Countdown bis zum Ende, sonst „hält an“;
+- **Unwetter**: DWD-Warnung ab Stufe 3 (rot, violett), die läuft oder binnen 60 min beginnt,
+  in der Farbe der Warnstufe mit „ab“/„bis“. Sie geht dem Regen vor.
+
+Steuern kann sie der Server oder die App (`App/LiveActivityController.swift`). Hat der Server
+einen APNs-Schlüssel (siehe README im Hauptordner), meldet die App ihr Push-to-Start-Token und
+den Ort, und der Server startet, aktualisiert und beendet die Aktivität nach jeder Poll-Runde,
+auch bei geschlossener App. Startet er eine, weckt das System die App kurz im Hintergrund, damit
+sie das Update-Token meldet. Ohne Schlüssel macht es die App selbst, solange sie im
+Vordergrund lädt; der Countdown zählt danach von allein weiter. Je Ereignis gibt es nur einen
+Start: Weggewischt bleibt sie für denselben Schauer (2 Stunden) oder dieselbe Warnung weg.
+Ausschalten unter Einstellungen → Sperrbildschirm. Für die Push-Token braucht die App-ID
+`dev.rubeen.witterung` die Capability **Push Notifications** (Apple Developer → Identifiers);
+die Entitlement `aps-environment` steht in `project.yml`.
 
 **Vorhersage geändert.** App und Widget merken sich je gespeichertem Ort stündlich eine
 Kurzfassung der Vorhersage (`ForecastDigest`, höchstens 24). Verglichen wird mit dem jüngsten

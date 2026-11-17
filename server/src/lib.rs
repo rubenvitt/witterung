@@ -10,6 +10,7 @@ pub mod decide;
 pub mod error;
 pub mod forecast;
 pub mod healthcheck;
+pub mod live;
 pub mod mcp;
 pub mod oauth;
 pub mod poller;
@@ -65,6 +66,14 @@ pub fn build(config: Config, http: reqwest::Client) -> anyhow::Result<(App, Rout
         .route(
             "/api/v1/devices/{id}",
             axum::routing::delete(api::delete_device),
+        )
+        .route(
+            "/api/v1/live-activities/registration",
+            axum::routing::put(live::register).delete(live::unregister),
+        )
+        .route(
+            "/api/v1/live-activities/{id}",
+            axum::routing::put(live::report_activity).delete(live::end_activity),
         )
         .route("/api/v1/connections", get(api::list_connections))
         .route(

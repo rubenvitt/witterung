@@ -75,6 +75,33 @@ struct API: Sendable {
         try await JSONDecoder.api.decode(RadarInfo.self, from: send("GET", "/api/v1/radar"))
     }
 
+    // MARK: Live-Aktivitäten (docs/api.md)
+
+    /// Meldet Push-to-Start-Token und Ort (fehlende Werte behält der Server). Antwort: ob der
+    /// Server die Aktivität per APNs steuert.
+    func registerLiveActivities(startToken: String?, placeId: Int?, sandbox: Bool) async throws -> Bool {
+        struct Response: Decodable { let apns: Bool }
+        var body: [String: Any] = ["sandbox": sandbox]
+        if let startToken { body["start_token"] = startToken }
+        if let placeId { body["place_id"] = placeId }
+        let data = try JSONSerialization.data(withJSONObject: body)
+        return try await JSONDecoder.api.decode(Response.self, from: send("PUT", "/api/v1/live-activities/registration", body: data)).apns
+    }
+
+    func unregisterLiveActivities() async throws {
+        _ = try await send("DELETE", "/api/v1/live-activities/registration")
+    }
+
+    /// Update-Token einer laufenden Aktivität.
+    func reportLiveActivity(id: String, token: String, placeId: Int, sandbox: Bool) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["token": token, "place_id": placeId, "sandbox": sandbox])
+        _ = try await send("PUT", "/api/v1/live-activities/\(id)", body: body)
+    }
+
+    func endLiveActivity(id: String) async throws {
+        _ = try await send("DELETE", "/api/v1/live-activities/\(id)")
+    }
+
     func exchangeCode(_ code: String, verifier: String) async throws -> String {
         struct TokenResponse: Decodable { let token: String }
         let body = try JSONSerialization.data(withJSONObject: ["code": code, "verifier": verifier])

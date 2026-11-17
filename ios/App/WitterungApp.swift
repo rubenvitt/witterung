@@ -12,6 +12,8 @@ struct WitterungApp: App {
         #endif
         _model = State(initialValue: AppModel())
         PhoneSync.shared.activate()
+        // Auch beim Wecken im Hintergrund nach einem Push-Start: Token an den Server.
+        LiveActivityController.observe()
     }
 
     var body: some Scene {

@@ -11,7 +11,7 @@ struct WitterungWidgetBundle: WidgetBundle {
         HourlyWidget()
         DailyWidget()
         #if os(iOS)
-        RainActivityWidget()
+        WeatherActivityWidget()
         #endif
     }
 }

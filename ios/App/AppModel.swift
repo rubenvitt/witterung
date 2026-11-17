@@ -23,6 +23,7 @@ final class AppModel {
     /// Was die Person antippt; steuert Kartenreihenfolge, Ansicht und Gewichte ein wenig.
     private(set) var habits: UsageStats = UsageStore.load()
     private(set) var calendarEnabled = SharedStore.calendarEnabled
+    private(set) var liveActivitiesEnabled = LiveActivityController.enabled
     private(set) var serverURL = SharedStore.serverURL
     private(set) var signedIn = !API.needsAuth(SharedStore.serverURL) || TokenStore.token != nil
     var message: String?
@@ -83,6 +84,15 @@ final class AppModel {
         calendarEnabled = enabled
         reloadPersonal()
         WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// Live-Aktivitäten (Regen, Unwetter) auf Sperrbildschirm und Dynamic Island.
+    func setLiveActivitiesEnabled(_ enabled: Bool) async {
+        liveActivitiesEnabled = enabled
+        await LiveActivityController.setEnabled(enabled)
+        if enabled, let first = pages.first, let forecast = forecasts[first] {
+            await LiveActivityController.sync(forecast: forecast, placeName: title(first))
+        }
     }
 
     /// Tipp auf eine Karte oder ein Widget merken.
@@ -151,8 +161,8 @@ final class AppModel {
             baselines[ref] = DigestStore.baseline(ref, now: .now)
             decisions[ref] = await JevClient.decide(forecast, ref: ref, placeName: title(ref), at: .now,
                                                     baseline: baselines[ref], events: events, habits: habits, api: api)
-            // „Regen in …“ als Live-Aktivität, für die erste Seite (Standort, sonst erster Ort).
-            if ref == pages.first { await RainActivityController.update(forecast: forecast, placeName: title(ref)) }
+            // Live-Aktivität (Regen, Unwetter) für die erste Seite (Standort, sonst erster Ort).
+            if ref == pages.first { await LiveActivityController.sync(forecast: forecast, placeName: title(ref)) }
             if manual {
                 refreshTick += 1
                 WidgetCenter.shared.reloadAllTimelines()

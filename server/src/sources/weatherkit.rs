@@ -40,18 +40,36 @@ impl std::fmt::Debug for WeatherKitConfig {
     }
 }
 
+/// Reads an Apple `.p8` key (PKCS#8, P-256). `what` names it in errors.
+pub(crate) fn p8_key(pem: &str, what: &str) -> Result<EcdsaKeyPair, String> {
+    let b64: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
+    let der = STANDARD
+        .decode(b64.trim())
+        .map_err(|e| format!("{what}-Schlüssel ist kein PEM: {e}"))?;
+    EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &der, &SystemRandom::new())
+        .map_err(|e| format!("{what}-Schlüssel unbrauchbar: {e}"))
+}
+
+/// A compact ES256 JWT.
+pub(crate) fn es256_jwt(
+    key: &EcdsaKeyPair,
+    header: &serde_json::Value,
+    claims: &serde_json::Value,
+) -> Result<String, String> {
+    let input = format!(
+        "{}.{}",
+        URL_SAFE_NO_PAD.encode(header.to_string()),
+        URL_SAFE_NO_PAD.encode(claims.to_string())
+    );
+    let sig = key
+        .sign(&SystemRandom::new(), input.as_bytes())
+        .map_err(|_| "JWT-Signatur fehlgeschlagen".to_owned())?;
+    Ok(format!("{input}.{}", URL_SAFE_NO_PAD.encode(sig.as_ref())))
+}
+
 impl WeatherKitConfig {
     fn key(&self) -> Result<EcdsaKeyPair, String> {
-        let b64: String = self
-            .key_pem
-            .lines()
-            .filter(|l| !l.starts_with("-----"))
-            .collect();
-        let der = STANDARD
-            .decode(b64.trim())
-            .map_err(|e| format!("WeatherKit-Schlüssel ist kein PEM: {e}"))?;
-        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &der, &SystemRandom::new())
-            .map_err(|e| format!("WeatherKit-Schlüssel unbrauchbar: {e}"))
+        p8_key(&self.key_pem, "WeatherKit")
     }
 
     /// Fails early (at startup) on a broken key.
@@ -73,15 +91,7 @@ impl WeatherKitConfig {
             "exp": iat + 3600,
             "sub": self.service_id,
         });
-        let input = format!(
-            "{}.{}",
-            URL_SAFE_NO_PAD.encode(header.to_string()),
-            URL_SAFE_NO_PAD.encode(claims.to_string())
-        );
-        let sig = key
-            .sign(&SystemRandom::new(), input.as_bytes())
-            .map_err(|_| SourceError::Http("JWT-Signatur fehlgeschlagen".into()))?;
-        Ok(format!("{input}.{}", URL_SAFE_NO_PAD.encode(sig.as_ref())))
+        es256_jwt(&key, &header, &claims).map_err(SourceError::Http)
     }
 }
 

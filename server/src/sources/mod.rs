@@ -146,6 +146,9 @@ pub struct Endpoints {
     pub bright_sky: Url,
     pub weatherkit: Url,
     pub pirate_weather: Url,
+    /// APNs (Live-Aktivitäten), Produktion und Sandbox.
+    pub apns: Url,
+    pub apns_sandbox: Url,
 }
 
 impl Default for Endpoints {
@@ -156,6 +159,8 @@ impl Default for Endpoints {
             bright_sky: url("https://api.brightsky.dev/"),
             weatherkit: url("https://weatherkit.apple.com/api/v1/"),
             pirate_weather: url("https://api.pirateweather.net/"),
+            apns: url("https://api.push.apple.com/"),
+            apns_sandbox: url("https://api.sandbox.push.apple.com/"),
         }
     }
 }

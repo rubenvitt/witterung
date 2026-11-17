@@ -247,6 +247,29 @@ pub fn push_state(place: &str, msg: &Message, now: Timestamp) -> Value {
     })
 }
 
+/// The stored DWD warnings and the radar nowcast of a place (a nowcast
+/// older than [`crate::forecast::NOWCAST_MAX_AGE`] counts as missing).
+pub async fn feeds(
+    app: &App,
+    place_id: i64,
+    now: Timestamp,
+) -> AppResult<(Vec<Alert>, Option<Nowcast>)> {
+    let snaps = app.blocking(move |c| db::snapshots(c, place_id)).await?;
+    let get = |key: &str| {
+        snaps
+            .iter()
+            .find(|(k, _, _)| k == key)
+            .map(|(_, _, j)| j.as_str())
+    };
+    let alerts: Vec<Alert> = get(ALERTS_KEY)
+        .and_then(|j| serde_json::from_str(j).ok())
+        .unwrap_or_default();
+    let nowcast: Option<Nowcast> = get(NOWCAST_KEY)
+        .and_then(|j| serde_json::from_str::<Nowcast>(j).ok())
+        .filter(|n| now.duration_since(n.at) <= crate::forecast::NOWCAST_MAX_AGE);
+    Ok((alerts, nowcast))
+}
+
 /// Runs after each poll round.
 pub async fn evaluate(app: &App, now: Timestamp) -> AppResult<()> {
     let s = load(app).await?;
@@ -261,19 +284,7 @@ pub async fn evaluate(app: &App, now: Timestamp) -> AppResult<()> {
         .collect();
     for place in places {
         let id = place.id;
-        let snaps = app.blocking(move |c| db::snapshots(c, id)).await?;
-        let get = |key: &str| {
-            snaps
-                .iter()
-                .find(|(k, _, _)| k == key)
-                .map(|(_, _, j)| j.as_str())
-        };
-        let alerts: Vec<Alert> = get(ALERTS_KEY)
-            .and_then(|j| serde_json::from_str(j).ok())
-            .unwrap_or_default();
-        let nowcast: Option<Nowcast> = get(NOWCAST_KEY)
-            .and_then(|j| serde_json::from_str::<Nowcast>(j).ok())
-            .filter(|n| now.duration_since(n.at) <= crate::forecast::NOWCAST_MAX_AGE);
+        let (alerts, nowcast) = feeds(app, id, now).await?;
         for (key, msg) in due_messages(&place.name, &alerts, nowcast.as_ref(), now) {
             let k = key.clone();
             let fresh = app

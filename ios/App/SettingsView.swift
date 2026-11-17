@@ -54,6 +54,16 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Live-Aktivitäten", isOn: Binding(
+                        get: { model.liveActivitiesEnabled },
+                        set: { enabled in Task { await model.setLiveActivitiesEnabled(enabled) } }))
+                } header: {
+                    Text("Sperrbildschirm")
+                } footer: {
+                    Text("Regen laut Radar in der nächsten Stunde (Countdown bis Beginn, dann bis zum Ende) und Unwetterwarnungen des DWD erscheinen auf dem Sperrbildschirm und in der Dynamic Island, für die erste Seite. Mit Push auf dem Server auch, wenn die App geschlossen ist.")
+                }
+
+                Section {
                     if let summary = model.habits.summary {
                         Text(summary).font(.subheadline)
                     } else {
