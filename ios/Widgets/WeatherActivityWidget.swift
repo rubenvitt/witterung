@@ -3,41 +3,51 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
-/// Sperrbildschirm und Dynamic Island für die Live-Aktivität (`WeatherActivityAttributes`):
-/// „Regen in …“ mit Countdown bis Beginn, „Regen endet in …“ und Unwetterwarnungen.
+/// Sperrbildschirm und Dynamic Island für die Live-Aktivität (`WeatherActivityAttributes`).
+/// Oben eine Zeile, die die Frage beantwortet („Trocken in 12:34“, „Regen bis ca. 21 Uhr“),
+/// darunter die Radarbalken der nächsten Stunde. Bei Warnungen Ereignis und Zeitraum.
 struct WeatherActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: WeatherActivityAttributes.self) { context in
             WeatherActivityLockView(context: context)
-                .activityBackgroundTint(context.state.background)
+                .activityBackgroundTint(Color.black.opacity(0.75))
                 .activitySystemActionForegroundColor(.white)
                 .widgetURL(context.attributes.url)
         } dynamicIsland: { context in
             let state = context.state
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label(context.attributes.placeName, systemImage: state.symbol)
-                        .font(.caption.weight(.semibold))
+                    Image(systemName: state.symbol)
+                        .font(.title2)
                         .foregroundStyle(state.tint)
-                        .lineLimit(1)
+                        .padding(.leading, Spacing.xs)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    ActivityCountdown(state: state, stale: context.isStale)
-                        .font(.title3.weight(.semibold))
+                    Text(context.attributes.placeName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .frame(maxWidth: 110, alignment: .trailing)
+                }
+                DynamicIslandExpandedRegion(.center) {
+                    Headline(state: state, stale: context.isStale)
+                        .font(.headline)
+                        .lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(alignment: .leading, spacing: Spacing.xxs) {
-                        Text(state.headline(place: context.attributes.placeName)).font(.headline).lineLimit(1)
+                    if let bars = state.bars, !bars.isEmpty {
+                        RainBars(state: state, height: 34)
+                    } else {
                         Text(state.detail()).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } compactLeading: {
                 Image(systemName: state.symbol).foregroundStyle(state.tint)
             } compactTrailing: {
-                ActivityCountdown(state: state, stale: context.isStale, compact: true)
-                    .frame(maxWidth: 56)
+                CompactValue(state: state, stale: context.isStale)
                     .font(.caption.weight(.semibold))
+                    .foregroundStyle(state.tint)
+                    .frame(maxWidth: 56)
             } minimal: {
                 Image(systemName: state.symbol).foregroundStyle(state.tint)
             }
@@ -54,7 +64,8 @@ private extension WeatherActivityAttributes {
 private extension WeatherActivityAttributes.ContentState {
     var symbol: String {
         switch kind {
-        case .rainSoon, .raining: peakMmH >= 4 ? "cloud.heavyrain.fill" : "cloud.rain.fill"
+        case .rainSoon: "umbrella"
+        case .raining: "umbrella.fill"
         case .warning: "exclamationmark.triangle.fill"
         }
     }
@@ -66,43 +77,103 @@ private extension WeatherActivityAttributes.ContentState {
         }
     }
 
-    var background: Color {
-        switch kind {
-        case .rainSoon, .raining: Color(red: 0.16, green: 0.22, blue: 0.3)
-        case .warning: alertSeverity == .extreme ? Color(red: 0.24, green: 0.08, blue: 0.28) : Color(red: 0.3, green: 0.09, blue: 0.09)
+    /// Countdown nur, solange das Ziel in der Zukunft liegt und die Daten frisch sind.
+    func liveTarget(stale: Bool) -> Date? {
+        guard !stale, let target = countdownTarget, target > .now else { return nil }
+        return target
+    }
+}
+
+/// „Trocken in 12:34“ (läuft von selbst), sonst der feste Titel.
+private struct Headline: View {
+    let state: WeatherActivityAttributes.ContentState
+    let stale: Bool
+
+    var body: some View {
+        if let target = state.liveTarget(stale: stale) {
+            HStack(spacing: Spacing.xs) {
+                Text(state.countdownLabel)
+                Text(timerInterval: Date.now...target, countsDown: true)
+                    .monospacedDigit()
+                    .foregroundStyle(state.tint)
+                    .fixedSize()
+            }
+        } else {
+            Text(state.title)
         }
     }
 }
 
-/// Rechte Seite: Countdown („4:59“) bei Regen, „ab 18:00“/„bis 04:00“ bei Warnungen.
-private struct ActivityCountdown: View {
+/// Rechts in der Dynamic Island: Countdown, sonst die wichtigste Uhrzeit.
+private struct CompactValue: View {
     let state: WeatherActivityAttributes.ContentState
     let stale: Bool
-    var compact = false
 
     var body: some View {
-        if let target = state.countdownTarget, !stale, target > .now {
+        if let target = state.liveTarget(stale: stale) {
             Text(timerInterval: Date.now...target, countsDown: true)
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
         } else {
-            Text(label).multilineTextAlignment(.trailing).lineLimit(1).minimumScaleFactor(0.7)
+            Text(label).lineLimit(1).minimumScaleFactor(0.7)
         }
     }
 
     private var label: String {
-        let time = { (prefix: String, date: Date) in compact ? Fmt.time(date) : "\(prefix) \(Fmt.time(date))" }
         switch state.kind {
-        case .rainSoon:
-            return "jetzt"
+        case .rainSoon: return "jetzt"
         case .raining:
-            guard let end = state.end else { return "hält an" }
-            return end <= .now ? "vorbei" : time("bis", end)
+            if let dry = state.dry { return Fmt.hour(dry) }
+            return "☂︎"
         case .warning:
-            if state.start > .now { return time("ab", state.start) }
-            if let end = state.end { return time("bis", end) }
-            return "aktiv"
+            if state.start > .now { return Fmt.time(state.start) }
+            return state.end.map(Fmt.time) ?? "aktiv"
         }
+    }
+}
+
+/// Radar der nächsten Stunde in 5-min-Balken; trockene Schritte als flache Striche.
+private struct RainBars: View {
+    let state: WeatherActivityAttributes.ContentState
+    var height: CGFloat = 44
+
+    private var bars: [Double] {
+        let values = state.bars ?? []
+        let count = WeatherActivityAttributes.ContentState.barCount
+        return values + Array(repeating: -1, count: max(0, count - values.count))
+    }
+
+    /// Wurzel-Skala bis 8 mm/h: leichter Regen bleibt sichtbar, Starkregen sprengt nichts.
+    private func level(_ v: Double) -> CGFloat {
+        guard v >= NowcastSummary.threshold else { return 0.06 }
+        return max(0.15, min(1, CGFloat((v / 8).squareRoot())))
+    }
+
+    var body: some View {
+        VStack(spacing: Spacing.xxs) {
+            HStack(alignment: .bottom, spacing: 3) {
+                ForEach(Array(bars.enumerated()), id: \.offset) { _, v in
+                    Capsule()
+                        .fill(state.tint.opacity(v < 0 ? 0 : v >= NowcastSummary.threshold ? 1 : 0.3))
+                        .frame(height: max(3, height * level(v)))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: height, alignment: .bottom)
+            if let start = state.barsStart.map(Date.init(timeIntervalSince1970:)) {
+                HStack(spacing: 0) {
+                    ForEach(0..<4) { i in
+                        Text(Fmt.time(start.addingTimeInterval(Double(i) * 900)))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Text("DWD").opacity(0.7)
+                }
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Regenradar der nächsten Stunde")
     }
 }
 
@@ -111,22 +182,26 @@ private struct WeatherActivityLockView: View {
 
     var body: some View {
         let state = context.state
-        HStack(spacing: Spacing.m) {
-            Image(systemName: state.symbol)
-                .font(.title)
-                .foregroundStyle(state.tint)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(state.headline(place: context.attributes.placeName)).font(.headline).lineLimit(1)
-                Text(state.detail()).font(.caption).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
-                if context.isStale {
-                    Text("Stand \(Fmt.time(Date(timeIntervalSince1970: state.updatedAt)))")
-                        .font(.caption2).foregroundStyle(.white.opacity(0.6))
-                }
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+                Image(systemName: state.symbol).foregroundStyle(state.tint)
+                Headline(state: state, stale: context.isStale)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: Spacing.s)
+                Text(context.attributes.placeName)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
             }
-            Spacer(minLength: Spacing.s)
-            ActivityCountdown(state: state, stale: context.isStale)
-                .font(.title2.weight(.semibold))
-                .frame(maxWidth: 96, alignment: .trailing)
+            .font(.title3.weight(.semibold))
+            Text(context.isStale ? "Stand \(Fmt.time(Date(timeIntervalSince1970: state.updatedAt))) · \(state.detail())" : state.detail())
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.75))
+                .lineLimit(1)
+            if let bars = state.bars, !bars.isEmpty {
+                RainBars(state: state)
+            }
         }
         .foregroundStyle(.white)
         .padding(Layout.cardPadding)

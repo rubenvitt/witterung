@@ -233,10 +233,9 @@ struct DecisionTests {
                                      decision: Self.decision(focus: ["alert": 0.1, "rainSoon": 0.2, "walk": 0.7]))
         #expect(ordered.map(\.kind) == [.walk, .rainSoon, .alert])
         #expect(ordered[0].jevProbability == 0.7)
-        #expect(ordered[0].reasonLine == "Längste trockene Lücke zwischen den Schauern · Jev 70 %")
-        #expect(ordered[0].shortReason == "Jev 70 %")
+        // Im Widget steht der Grund, keine Prozentzahl.
+        #expect(ordered[0].reasonLine == "Längste trockene Lücke zwischen den Schauern")
         #expect(ordered[1].jevProbability == nil)
-        #expect(ordered[1].shortReason == "Radar")
     }
 
     @Test func rulesStayWhenUnsureOrDifferent() throws {

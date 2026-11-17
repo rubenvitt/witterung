@@ -312,10 +312,7 @@ struct ReasonLine: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "sparkles")
-            Text(text)
-        }
+        Text(text)
         .font(.system(size: 10, weight: .medium))
         .lineLimit(1)
         .minimumScaleFactor(0.8)
@@ -471,7 +468,7 @@ private struct FocusRectangular: View {
                 }
                 .widgetAccentable()
                 Text(f.shortDetail)
-                Text("\(Fmt.temp(s.temp)) · \(f.shortReason)").opacity(0.8)
+                Text("\(Fmt.temp(s.temp)) · \(s.placeName)").opacity(0.8)
             }
         }
         .lineLimit(1)

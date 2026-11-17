@@ -192,7 +192,8 @@ Was gezeigt wird, prüft der Server nach jeder Poll-Runde (`server/src/live.rs`)
 
 Start je Ereignis nur einmal (Warnung: je ID, Regen: höchstens alle 2 Stunden), auch wenn die
 Aktivität weggewischt wird. Updates bei anderem Zustand oder anderer Warnung (Priorität 10,
-mit Hinweis), bei ≥ 5 min verschobenem Beginn/Ende oder anderer Regenstärke und spätestens
+mit Hinweis), bei ≥ 5 min verschobenem Beginn/Ende, anderer Regenstärke, weitergerückten oder
+anders hohen Balken und spätestens
 alle 20 min, damit sie nicht veraltet (Priorität 5). Ende, sobald nichts mehr ansteht oder die
 erste Seite einen anderen Ort zeigt. Ungültige Token (`410`, `BadDeviceToken` …) vergisst der
 Server.
@@ -201,8 +202,13 @@ Server.
 
 ```json
 {"kind": "rain_soon", "startsAt": 1794226680, "endsAt": 1794227400, "peakMmH": 3.0,
- "event": null, "severity": null, "updatedAt": 1794225600}
+ "updatedAt": 1794225600, "bars": [0, 0, 0.3, 1.2, 3.0, 0.4, 0, 0, 0, 0, 0, 0],
+ "barsStart": 1794225600}
 ```
+
+`bars`: Radar ab dem laufenden 5-min-Schritt, eine Stunde (mm/h), `barsStart` dessen Beginn.
+`dryAt`: regnet es über das Radar hinaus, die erste trockene Stunde laut Konsens (höchstens 12 h).
+Fehlende Werte lässt der Server weg.
 
 `kind` ist `rain_soon`, `raining` oder `warning` (dann mit `event` wie „ORKANARTIGE BÖEN“ und
 `severity`). Attribute beim Start: `{"placeId": 3, "placeName": "Uelzen", "current": false}`.
