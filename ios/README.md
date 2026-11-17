@@ -57,7 +57,7 @@ starten (der Versuch zählt mit). Für eine neue Version `MARKETING_VERSION` erh
 
 ### Tests
 
-59 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
+60 Logiktests (Swift Testing): Dekodieren der Fixture `WitterungTests/Fixtures/forecast.json`
 (Uelzen im November, Warnungen, Regen in 25 min, eine Quelle mit Kontingentfehler),
 PKCE-Testvektor aus RFC 7636 Anhang B, Nowcast-Sätze, Regenhinweis und stündliche
 Widget-Timeline, WMS-BBOX-Rechnung, deutsche Zahlen- und Zeitformate, dazu
@@ -212,7 +212,8 @@ vorn steht, welche Ansicht das Widget zeigt, wie dringend die Lage ist (Smart St
 15/30/60 min), welche Karte auf der Ortsseite oben steht und welches Gassi-Fenster am besten ist.
 Jev bekommt dafür die Lage (Temperatur, Radar-Satz, Warnungen, Nacht, 12 Stunden), die Hinweise
 und die trockenen Fenster als Optionen. Übernommen wird nur bei Konfidenz ≥ 0,5; rote und violette
-Warnungen bleiben immer vorn. Der Grund zeigt dann „· Jev 84 %“. Ohne Schlüssel auf dem Server,
+Warnungen bleiben immer vorn. In der App zeigt ein ✨ an der Karte, dass Jev sie nach vorn geholt
+hat; in den Widgets steht nur der Grund, keine Prozentzahl. Ohne Schlüssel auf dem Server,
 offline oder bei Fehlern gelten die Regeln (bzw. die letzte Jev-Antwort aus dem Cache). Die
 Gewichte unten sind also die Rückfallebene. Auch Push-Nachrichten prüft der Server vorher mit Jev.
 
@@ -246,10 +247,16 @@ Einstellungen → Gelernt.
 dem Sperrbildschirm und in der Dynamic Island, was in der nächsten Stunde ansteht
 (`Shared/WeatherActivity.swift`, `Widgets/WeatherActivityWidget.swift`):
 
-- **Regen in …**: Radar sagt Regen binnen 60 min, Countdown bis Beginn, Stärke und Ende;
-- **Regen endet in …**: es regnet, Countdown bis zum Ende, sonst „hält an“;
+- **Regen in 12:34**: Radar sagt Regen binnen 60 min; darunter „ab 14:25 bis 14:50, mäßig“;
+- **Trocken in 12:34**: es regnet und das Radar zeigt das Ende. Reicht der Regen über das Radar
+  (2 h) hinaus, steht dort „Regen bis ca. 21 Uhr“ aus dem Stundenkonsens, sonst „Regen hält an“;
 - **Unwetter**: DWD-Warnung ab Stufe 3 (rot, violett), die läuft oder binnen 60 min beginnt,
   in der Farbe der Warnstufe mit „ab“/„bis“. Sie geht dem Regen vor.
+
+Bei Regen zeigen zwölf Balken das Radar der nächsten Stunde (5-min-Schritte, Wurzelskala bis
+8 mm/h, trockene Schritte flach), darunter die Uhrzeiten und „DWD“ als Quelle. Der Server
+schickt neue Balken, wenn sie weiterrücken oder ein neuer Radarlauf sie ändert (Priorität 5,
+ohne Budget).
 
 Steuern kann sie der Server oder die App (`App/LiveActivityController.swift`). Hat der Server
 einen APNs-Schlüssel (siehe README im Hauptordner), meldet die App ihr Push-to-Start-Token und

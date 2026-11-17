@@ -48,16 +48,9 @@ extension Insight {
         return false
     }
 
-    /// Grund samt Jev-Anteil, wenn Jev diesen Hinweis nach vorn geholt hat.
-    var reasonLine: String {
-        guard let p = jevProbability else { return reason }
-        return "\(reason) · Jev \(Int((p * 100).rounded())) %"
-    }
-
-    /// Herkunft für Sperrbildschirm und Watch: „Jev 84 %“ oder „Radar“.
-    var shortReason: String {
-        jevProbability.map { "Jev \(Int(($0 * 100).rounded())) %" } ?? source
-    }
+    /// Grund in Worten. Wie sicher Jev war, gehört nicht ins Widget: eine Prozentzahl
+    /// beantwortet keine Frage, die man auf dem Sperrbildschirm hat.
+    var reasonLine: String { reason }
 
     /// Hinweise mit allem, was Jev entschieden hat: Gassi-Fenster und Reihenfolge.
     static func ranked(_ forecast: Forecast, at now: Date, baseline: ForecastDigest? = nil, events: [CalendarEvent] = [],

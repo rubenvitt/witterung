@@ -162,7 +162,8 @@ enum LiveActivityController {
     private static func updateLocally(forecast: Forecast, placeName: String, now: Date) async {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         let running = WeatherActivity.activities
-        guard let state = WeatherActivityAttributes.ContentState.desired(alerts: forecast.alerts, nowcast: forecast.nowcast, now: now)
+        guard let state = WeatherActivityAttributes.ContentState.desired(alerts: forecast.alerts, nowcast: forecast.nowcast,
+                                                                              hourly: forecast.hourly, now: now)
         else {
             for activity in running { await activity.end(nil, dismissalPolicy: .immediate) }
             return

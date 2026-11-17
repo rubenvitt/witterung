@@ -155,6 +155,15 @@ pub struct LiveState {
     pub severity: Option<String>,
     /// Stand der Daten (Unix-Sekunden).
     pub updated_at: i64,
+    /// Radar ab dem laufenden 5-min-Schritt, eine Stunde (mm/h, 12 Werte); leer bei Warnungen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bars: Vec<f64>,
+    /// Beginn des ersten Balkens (Unix-Sekunden).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bars_start: Option<i64>,
+    /// Regnet es über das Radar hinaus: erste trockene Stunde laut Konsens (Unix-Sekunden).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dry_at: Option<i64>,
 }
 
 /// Was gerade zu zeigen ist, und woran ein Ereignis wiedererkannt wird.
@@ -191,8 +200,17 @@ pub fn event_title(event: &str) -> String {
         .join(" ")
 }
 
-/// Was die Aktivität jetzt zeigen soll; `None` = keine Aktivität.
-pub fn desired(alerts: &[Alert], nowcast: Option<&Nowcast>, now: Timestamp) -> Option<Desired> {
+/// So viele 5-min-Balken zeigt die Aktivität (eine Stunde).
+const BARS: usize = 12;
+
+/// Was die Aktivität jetzt zeigen soll; `None` = keine Aktivität. `hourly` ist der
+/// Stundenniederschlag laut Konsens (`(Stunde, mm)`), für das Ende hinter dem Radar.
+pub fn desired(
+    alerts: &[Alert],
+    nowcast: Option<&Nowcast>,
+    hourly: &[(Timestamp, f64)],
+    now: Timestamp,
+) -> Option<Desired> {
     let warning = alerts
         .iter()
         .filter(|a| a.severity_rank() >= 3)
@@ -212,6 +230,9 @@ pub fn desired(alerts: &[Alert], nowcast: Option<&Nowcast>, now: Timestamp) -> O
                 event: Some(a.event.clone()),
                 severity: Some(a.severity.clone()),
                 updated_at: now.as_second(),
+                bars: Vec::new(),
+                bars_start: None,
+                dry_at: None,
             },
             key: format!("alert:{}", a.id),
         });
@@ -241,15 +262,37 @@ pub fn desired(alerts: &[Alert], nowcast: Option<&Nowcast>, now: Timestamp) -> O
         .iter()
         .map(|p| p.precip_mm_h)
         .fold(0.0, f64::max);
+    let round = |v: f64| (v * 10.0).round() / 10.0;
+    let bars = points[current..]
+        .iter()
+        .take(BARS)
+        .map(|p| round(p.precip_mm_h))
+        .collect();
+    // Kein Ende im Radar: erste trockene Stunde danach laut Konsens (höchstens 12 h).
+    let dry_at = match (kind, end) {
+        (Kind::Raining, None) => {
+            let horizon = points.last().map_or(now, |p| p.at + step);
+            hourly
+                .iter()
+                .find(|(at, mm)| {
+                    *at >= horizon && *at < now + SignedDuration::from_hours(12) && *mm < 0.1
+                })
+                .map(|(at, _)| at.as_second())
+        }
+        _ => None,
+    };
     Some(Desired {
         state: LiveState {
             kind,
             starts_at: points[first].at.as_second(),
             ends_at: end.map(|i| points[i].at.as_second()),
-            peak_mm_h: (peak * 10.0).round() / 10.0,
+            peak_mm_h: round(peak),
             event: None,
             severity: None,
             updated_at: now.as_second(),
+            bars,
+            bars_start: Some(points[current].at.as_second()),
+            dry_at,
         },
         key: "rain".into(),
     })
@@ -276,9 +319,19 @@ pub fn change(old: Option<&LiveState>, new: &LiveState, now: Timestamp) -> Chang
         (Some(a), Some(b)) => (a - b).abs() >= SHIFT_S,
         (a, b) => a.is_some() != b.is_some(),
     };
+    // Die Balken rücken alle 5 min weiter; ein neuer Radarlauf ändert ihre Höhe.
+    let bars_moved = old.bars_start != new.bars_start
+        || old.bars.len() != new.bars.len()
+        || old
+            .bars
+            .iter()
+            .zip(&new.bars)
+            .any(|(a, b)| (a - b).abs() >= 0.3 || (*a >= WET_MM_H) != (*b >= WET_MM_H));
     if shifted(Some(old.starts_at), Some(new.starts_at))
         || shifted(old.ends_at, new.ends_at)
+        || shifted(old.dry_at, new.dry_at)
         || intensity(old.peak_mm_h) != intensity(new.peak_mm_h)
+        || bars_moved
     {
         return Change::Minor;
     }
@@ -292,6 +345,13 @@ pub fn change(old: Option<&LiveState>, new: &LiveState, now: Timestamp) -> Chang
 }
 
 /// Hinweis (Banner, Sperrbildschirm) zu Start und Zustandswechsel.
+/// „21 Uhr“ in Europe/Berlin.
+fn hour(t: i64) -> String {
+    Timestamp::from_second(t)
+        .map(|t| format!("{} Uhr", t.to_zoned(crate::sources::berlin()).hour()))
+        .unwrap_or_default()
+}
+
 pub fn alert_text(place: &str, s: &LiveState, now: Timestamp) -> (String, String) {
     let time = |t: i64| {
         Timestamp::from_second(t)
@@ -303,14 +363,18 @@ pub fn alert_text(place: &str, s: &LiveState, now: Timestamp) -> (String, String
             let mins = ((s.starts_at - now.as_second()).max(0) + 59) / 60;
             (
                 format!("{place}: {} in {mins} min", intensity(s.peak_mm_h)),
-                format!("Ab {} laut Radar.", time(s.starts_at)),
+                match s.ends_at {
+                    Some(end) => format!("{} bis {}.", time(s.starts_at), time(end)),
+                    None => format!("Ab {}.", time(s.starts_at)),
+                },
             )
         }
         Kind::Raining => (
             format!("{place}: {}", intensity(s.peak_mm_h)),
-            match s.ends_at {
-                Some(end) => format!("Endet gegen {} laut Radar.", time(end)),
-                None => "Hält laut Radar mindestens zwei Stunden an.".into(),
+            match (s.ends_at, s.dry_at) {
+                (Some(end), _) => format!("Trocken ab {}.", time(end)),
+                (None, Some(dry)) => format!("Trocken ab etwa {}.", hour(dry)),
+                (None, None) => "Kein Ende in Sicht.".into(),
             },
         ),
         Kind::Warning => {
@@ -494,7 +558,21 @@ async fn evaluate_device(
     let desired = match &place {
         Some(p) => {
             let (alerts, nowcast) = crate::push::feeds(app, p.id, now).await?;
-            desired(&alerts, nowcast.as_ref(), now)
+            // Stundenwerte nur, wenn es regnet und das Radar kein Ende zeigt.
+            let raining_on = nowcast
+                .as_ref()
+                .is_some_and(|n| n.points.last().is_some_and(|p| p.precip_mm_h >= WET_MM_H));
+            let hourly: Vec<(Timestamp, f64)> = if raining_on {
+                crate::api::forecast_for(app, p.clone())
+                    .await?
+                    .hourly
+                    .iter()
+                    .filter_map(|r| r.at.map(|at| (at, r.consensus.precip_mm)))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            desired(&alerts, nowcast.as_ref(), &hourly, now)
         }
         None => None,
     };
@@ -769,7 +847,7 @@ mod tests {
     fn rain_soon_then_raining() {
         let t0 = t("2026-11-17T12:00:00Z");
         let n = nowcast(t0, &[0.0, 0.0, 0.0, 0.3, 1.2, 5.0, 0.0, 0.0]);
-        let d = desired(&[], Some(&n), t0 + SignedDuration::from_mins(2)).unwrap();
+        let d = desired(&[], Some(&n), &[], t0 + SignedDuration::from_mins(2)).unwrap();
         assert_eq!(d.state.kind, Kind::RainSoon);
         assert_eq!(
             d.state.starts_at,
@@ -783,7 +861,7 @@ mod tests {
         assert_eq!(d.key, "rain");
 
         // Mitten im Schauer: Beginn bleibt, Countdown aufs Ende.
-        let d = desired(&[], Some(&n), t0 + SignedDuration::from_mins(22)).unwrap();
+        let d = desired(&[], Some(&n), &[], t0 + SignedDuration::from_mins(22)).unwrap();
         assert_eq!(d.state.kind, Kind::Raining);
         assert_eq!(
             d.state.starts_at,
@@ -795,7 +873,37 @@ mod tests {
         );
 
         // Vorbei: nichts mehr.
-        assert!(desired(&[], Some(&n), t0 + SignedDuration::from_mins(31)).is_none());
+        assert!(desired(&[], Some(&n), &[], t0 + SignedDuration::from_mins(31)).is_none());
+    }
+
+    #[test]
+    fn bars_for_the_next_hour_and_dry_hour_after_the_radar() {
+        let t0 = t("2026-11-17T12:00:00Z");
+        let n = nowcast(t0, &[0.04, 0.0, 0.33, 1.26, 0.0]);
+        let d = desired(&[], Some(&n), &[], t0 + SignedDuration::from_mins(6)).unwrap();
+        // Ab dem laufenden Schritt (12:05), gerundet.
+        assert_eq!(d.state.bars, vec![0.0, 0.3, 1.3, 0.0]);
+        assert_eq!(
+            d.state.bars_start,
+            Some((t0 + SignedDuration::from_mins(5)).as_second())
+        );
+        assert_eq!(d.state.dry_at, None);
+
+        // Regen bis ans Ende des Radars: Ende aus den Stunden.
+        let n = nowcast(t0, &[1.0; 24]);
+        let hour = |h: i64| t0 + SignedDuration::from_hours(h);
+        let hourly = [
+            (hour(1), 2.0),
+            (hour(2), 0.6),
+            (hour(3), 0.4),
+            (hour(4), 0.0),
+        ];
+        let d = desired(&[], Some(&n), &hourly, t0).unwrap();
+        assert_eq!(d.state.kind, Kind::Raining);
+        assert_eq!(d.state.bars.len(), 12);
+        assert_eq!(d.state.dry_at, Some(hour(4).as_second()));
+        let (_, body) = alert_text("Uelzen", &d.state, t0);
+        assert_eq!(body, "Trocken ab etwa 17 Uhr.");
     }
 
     #[test]
@@ -803,11 +911,14 @@ mod tests {
         let t0 = t("2026-11-17T12:00:00Z");
         let mut v = vec![0.0; 13];
         v.push(2.0);
-        assert!(desired(&[], Some(&nowcast(t0, &v)), t0).is_none(), "65 min");
-        let d = desired(&[], Some(&nowcast(t0, &[0.4; 24])), t0).unwrap();
+        assert!(
+            desired(&[], Some(&nowcast(t0, &v)), &[], t0).is_none(),
+            "65 min"
+        );
+        let d = desired(&[], Some(&nowcast(t0, &[0.4; 24])), &[], t0).unwrap();
         assert_eq!(d.state.kind, Kind::Raining);
         assert_eq!(d.state.ends_at, None);
-        assert!(desired(&[], None, t0).is_none());
+        assert!(desired(&[], None, &[], t0).is_none());
     }
 
     #[test]
@@ -815,22 +926,22 @@ mod tests {
         let now = t("2026-11-17T12:00:00Z");
         let rain = nowcast(now, &[1.0, 1.0, 0.0]);
         let moderate = alert("m", "moderate", now, 3);
-        let d = desired(std::slice::from_ref(&moderate), Some(&rain), now).unwrap();
+        let d = desired(std::slice::from_ref(&moderate), Some(&rain), &[], now).unwrap();
         assert_eq!(d.state.kind, Kind::Raining);
 
         let later = alert("s", "severe", now + SignedDuration::from_mins(50), 3);
         let extreme = alert("x", "extreme", now + SignedDuration::from_mins(30), 2);
-        let d = desired(&[moderate, later.clone(), extreme], Some(&rain), now).unwrap();
+        let d = desired(&[moderate, later.clone(), extreme], Some(&rain), &[], now).unwrap();
         assert_eq!(d.key, "alert:x");
         assert_eq!(d.state.kind, Kind::Warning);
         assert_eq!(d.state.severity.as_deref(), Some("extreme"));
 
         // Beginnt erst in 90 min: noch nicht.
         let far = alert("f", "severe", now + SignedDuration::from_mins(90), 3);
-        assert!(desired(&[far], None, now).is_none());
+        assert!(desired(&[far], None, &[], now).is_none());
         // Abgelaufen: nicht mehr.
         let old = alert("o", "severe", now - SignedDuration::from_hours(4), 3);
-        assert!(desired(&[old], None, now).is_none());
+        assert!(desired(&[old], None, &[], now).is_none());
     }
 
     #[test]
@@ -844,6 +955,9 @@ mod tests {
             event: None,
             severity: None,
             updated_at: now.as_second(),
+            bars: Vec::new(),
+            bars_start: None,
+            dry_at: None,
         };
         let later = now + SignedDuration::from_mins(10);
         let same = LiveState {
@@ -892,6 +1006,9 @@ mod tests {
             event: None,
             severity: None,
             updated_at: now.as_second(),
+            bars: Vec::new(),
+            bars_start: None,
+            dry_at: None,
         };
         let p = payload("start", &place, Some(&state), true, now);
         let aps = &p["aps"];
@@ -906,7 +1023,7 @@ mod tests {
         assert_eq!(aps["content-state"]["peakMmH"], 3.0);
         assert!(aps["content-state"].get("endsAt").is_none());
         assert_eq!(aps["alert"]["title"], "Uelzen: Regen in 18 min");
-        assert_eq!(aps["alert"]["body"], "Ab 13:18 laut Radar.");
+        assert_eq!(aps["alert"]["body"], "Ab 13:18.");
         assert_eq!(aps["stale-date"], now.as_second() + 1800);
 
         let end = payload("end", &place, Some(&state), false, now);
@@ -926,6 +1043,9 @@ mod tests {
             event: Some("ORKANARTIGE BÖEN".into()),
             severity: Some("severe".into()),
             updated_at: now.as_second(),
+            bars: Vec::new(),
+            bars_start: None,
+            dry_at: None,
         };
         let (title, body) = alert_text("Uelzen", &s, now);
         assert_eq!(title, "Uelzen: Unwetterwarnung");
