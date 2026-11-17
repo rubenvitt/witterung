@@ -282,6 +282,9 @@ pub async fn poll_once(app: &App, now: Timestamp) {
     if let Err(e) = crate::push::evaluate(app, now).await {
         tracing::error!(error = %e, "push check failed");
     }
+    if let Err(e) = crate::live::evaluate(app, now).await {
+        tracing::error!(error = %e, "live activity check failed");
+    }
     if let Err(e) = housekeeping(app, now).await {
         tracing::error!(error = %e, "housekeeping failed");
     }
@@ -301,8 +304,10 @@ pub async fn poll_place(app: &App, place: &Place, providers: &[Provider], now: T
 
 async fn housekeeping(app: &App, now: Timestamp) -> crate::error::AppResult<()> {
     let week_ago = (now - SignedDuration::from_hours(24 * 7)).as_millisecond();
+    let lifetime = (now - crate::live::MAX_LIFETIME).as_millisecond();
     app.blocking(move |c| {
         db::purge_current_places(c, week_ago)?;
+        db::purge_live_activities(c, lifetime)?;
         db::purge_push_sent(c, week_ago)
     })
     .await?;

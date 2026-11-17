@@ -21,6 +21,7 @@ struct Inner {
     oidc: Option<Arc<OidcClient>>,
     http: reqwest::Client,
     decisions: crate::decide::DecisionCache,
+    apns: Option<crate::live::Apns>,
 }
 
 /// A freshly created session; `id` goes into the cookie.
@@ -52,8 +53,15 @@ impl App {
                 http.clone(),
             ))
         });
+        let apns = config
+            .apns
+            .clone()
+            .map(crate::live::Apns::new)
+            .transpose()
+            .map_err(anyhow::Error::msg)?;
         Ok(Self {
             inner: Arc::new(Inner {
+                apns,
                 config,
                 db: Mutex::new(conn),
                 oidc,
@@ -78,6 +86,11 @@ impl App {
     /// Cached Jev answers (`decide.rs`).
     pub fn decisions(&self) -> &crate::decide::DecisionCache {
         &self.inner.decisions
+    }
+
+    /// APNs for Live Activities; `None` without credentials.
+    pub fn apns(&self) -> Option<&crate::live::Apns> {
+        self.inner.apns.as_ref()
     }
 
     /// Runs `f` with the database on the blocking pool.

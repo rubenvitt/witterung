@@ -12,6 +12,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0002_sources.sql"),
     include_str!("../migrations/0003_m2.sql"),
     include_str!("../migrations/0004_oauth.sql"),
+    include_str!("../migrations/0005_live_activities.sql"),
 ];
 
 /// Opens (and creates) the database and applies pending migrations.
@@ -412,6 +413,183 @@ pub fn unmark_push_sent(conn: &Connection, place_id: i64, key: &str) -> anyhow::
 
 pub fn purge_push_sent(conn: &Connection, before: i64) -> anyhow::Result<()> {
     conn.execute("DELETE FROM push_sent WHERE sent_at < ?1", [before])?;
+    Ok(())
+}
+
+/// A device's sign-up for Live Activities over APNs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveRegistration {
+    pub device_id: i64,
+    pub start_token: Option<String>,
+    pub sandbox: bool,
+    pub place_id: Option<i64>,
+    pub start_key: Option<String>,
+    pub started_at: Option<i64>,
+}
+
+/// Creates or updates the registration; a missing token or place keeps the
+/// stored one, and `start_key` stays (an event that already started stays
+/// started across re-registrations).
+pub fn upsert_live_registration(
+    conn: &Connection,
+    device_id: i64,
+    start_token: Option<&str>,
+    sandbox: bool,
+    place_id: Option<i64>,
+    now: i64,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO live_registrations (device_id, start_token, sandbox, place_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (device_id) DO UPDATE SET
+             start_token = COALESCE(excluded.start_token, start_token),
+             sandbox = excluded.sandbox,
+             place_id = COALESCE(excluded.place_id, place_id),
+             updated_at = excluded.updated_at",
+        params![device_id, start_token, sandbox, place_id, now],
+    )?;
+    Ok(())
+}
+
+/// Removes the registration and every activity of the device.
+pub fn delete_live_registration(conn: &Connection, device_id: i64) -> anyhow::Result<()> {
+    conn.execute(
+        "DELETE FROM live_registrations WHERE device_id = ?1",
+        [device_id],
+    )?;
+    conn.execute(
+        "DELETE FROM live_activities WHERE device_id = ?1",
+        [device_id],
+    )?;
+    Ok(())
+}
+
+pub fn live_registrations(conn: &Connection) -> anyhow::Result<Vec<LiveRegistration>> {
+    let mut stmt = conn.prepare(
+        "SELECT device_id, start_token, sandbox, place_id, start_key, started_at
+         FROM live_registrations ORDER BY device_id",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(LiveRegistration {
+            device_id: r.get(0)?,
+            start_token: r.get(1)?,
+            sandbox: r.get(2)?,
+            place_id: r.get(3)?,
+            start_key: r.get(4)?,
+            started_at: r.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn mark_live_started(
+    conn: &Connection,
+    device_id: i64,
+    key: &str,
+    now: i64,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE live_registrations SET start_key = ?2, started_at = ?3 WHERE device_id = ?1",
+        params![device_id, key, now],
+    )?;
+    Ok(())
+}
+
+/// APNs no longer knows the push-to-start token.
+pub fn clear_live_start_token(conn: &Connection, device_id: i64) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE live_registrations SET start_token = NULL WHERE device_id = ?1",
+        [device_id],
+    )?;
+    Ok(())
+}
+
+/// A running Live Activity and the token that updates it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LiveActivity {
+    pub activity_id: String,
+    pub device_id: i64,
+    pub place_id: Option<i64>,
+    pub token: String,
+    pub sandbox: bool,
+    pub state: Option<String>,
+    pub updated_at: i64,
+}
+
+/// Records (or refreshes) an activity's update token. `false` if the ID
+/// belongs to another device.
+pub fn upsert_live_activity(
+    conn: &Connection,
+    activity_id: &str,
+    device_id: i64,
+    place_id: Option<i64>,
+    token: &str,
+    sandbox: bool,
+    now: i64,
+) -> anyhow::Result<bool> {
+    Ok(conn.execute(
+        "INSERT INTO live_activities
+             (activity_id, device_id, place_id, token, sandbox, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+         ON CONFLICT (activity_id) DO UPDATE SET
+             place_id = excluded.place_id,
+             token = excluded.token,
+             sandbox = excluded.sandbox,
+             updated_at = excluded.updated_at
+         WHERE device_id = excluded.device_id",
+        params![activity_id, device_id, place_id, token, sandbox, now],
+    )? > 0)
+}
+
+pub fn live_activities(conn: &Connection, device_id: i64) -> anyhow::Result<Vec<LiveActivity>> {
+    let mut stmt = conn.prepare(
+        "SELECT activity_id, device_id, place_id, token, sandbox, state, updated_at
+         FROM live_activities WHERE device_id = ?1 ORDER BY created_at",
+    )?;
+    let rows = stmt.query_map([device_id], |r| {
+        Ok(LiveActivity {
+            activity_id: r.get(0)?,
+            device_id: r.get(1)?,
+            place_id: r.get(2)?,
+            token: r.get(3)?,
+            sandbox: r.get(4)?,
+            state: r.get(5)?,
+            updated_at: r.get(6)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+pub fn set_live_activity_state(
+    conn: &Connection,
+    activity_id: &str,
+    state: &str,
+    now: i64,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "UPDATE live_activities SET state = ?2, updated_at = ?3 WHERE activity_id = ?1",
+        params![activity_id, state, now],
+    )?;
+    Ok(())
+}
+
+pub fn delete_live_activity(
+    conn: &Connection,
+    device_id: i64,
+    activity_id: &str,
+) -> anyhow::Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM live_activities WHERE activity_id = ?1 AND device_id = ?2",
+        params![activity_id, device_id],
+    )? > 0)
+}
+
+/// The system ends every Live Activity after at most 12 hours.
+pub fn purge_live_activities(conn: &Connection, before: i64) -> anyhow::Result<()> {
+    conn.execute(
+        "DELETE FROM live_activities WHERE created_at < ?1",
+        [before],
+    )?;
     Ok(())
 }
 

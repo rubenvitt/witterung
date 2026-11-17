@@ -168,6 +168,45 @@ seit über 3 h nichts geliefert hat.
 Ausgelöst wird bei neuer DWD-Warnung (ab `moderate`) und bei Regenbeginn in < 30 min laut
 Radar, je Ort mit `notify: true`.
 
+## Live-Aktivitäten (APNs)
+
+Nur mit Geräte-Token (iOS-App), sonst `403`. Mit APNs-Zugang auf dem Server
+(`WITTERUNG_APNS_*`) startet, aktualisiert und beendet der Server die Live-Aktivität der App
+über APNs, auch wenn die App nicht läuft. Ohne ihn macht die App das selbst, solange sie im
+Vordergrund lädt.
+
+- `PUT /api/v1/live-activities/registration` `{"start_token": "<hex>"?, "place_id": 3?,
+  "sandbox": false}` → `{"apns": bool}`. Push-to-Start-Token und der Ort, dem die Aktivität
+  folgt (die erste Seite der App, auch „Mein Standort“). Fehlende Werte bleiben, wie sie
+  waren. `sandbox: true` für Token aus Debug-Builds.
+- `DELETE /api/v1/live-activities/registration` → `204`: aus, alle Aktivitäten des Geräts vergessen.
+- `PUT /api/v1/live-activities/{activity_id}` `{"token": "<hex>", "place_id": 3, "sandbox": false}`
+  → `204`: Update-Token einer laufenden Aktivität.
+- `DELETE /api/v1/live-activities/{activity_id}` → `204`: beendet oder weggewischt.
+
+Was gezeigt wird, prüft der Server nach jeder Poll-Runde (`server/src/live.rs`):
+
+1. Unwetterwarnung des DWD (`severe`, `extreme`), die läuft oder binnen 60 min beginnt;
+2. sonst Regen laut Radar (ab 0,1 mm/h): `raining` mit Ende, falls absehbar, oder `rain_soon`,
+   wenn er binnen 60 min beginnt.
+
+Start je Ereignis nur einmal (Warnung: je ID, Regen: höchstens alle 2 Stunden), auch wenn die
+Aktivität weggewischt wird. Updates bei anderem Zustand oder anderer Warnung (Priorität 10,
+mit Hinweis), bei ≥ 5 min verschobenem Beginn/Ende oder anderer Regenstärke und spätestens
+alle 20 min, damit sie nicht veraltet (Priorität 5). Ende, sobald nichts mehr ansteht oder die
+erste Seite einen anderen Ort zeigt. Ungültige Token (`410`, `BadDeviceToken` …) vergisst der
+Server.
+
+`content-state` (Zeiten als Unix-Sekunden):
+
+```json
+{"kind": "rain_soon", "startsAt": 1794226680, "endsAt": 1794227400, "peakMmH": 3.0,
+ "event": null, "severity": null, "updatedAt": 1794225600}
+```
+
+`kind` ist `rain_soon`, `raining` oder `warning` (dann mit `event` wie „ORKANARTIGE BÖEN“ und
+`severity`). Attribute beim Start: `{"placeId": 3, "placeName": "Uelzen", "current": false}`.
+
 ## MCP (Agenten)
 
 `POST /mcp`: MCP-Server für Claude und andere Agenten (Streamable HTTP, JSON-RPC 2.0,

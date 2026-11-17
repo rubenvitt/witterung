@@ -54,6 +54,9 @@ targets:
         # Erster Eintrag = Standardgruppe: Token-Einträge landen ohne Angabe im Code
         # in der gemeinsamen Gruppe, App und Widget lesen dasselbe Token.
         keychain-access-groups: [$(AppIdentifierPrefix)dev.rubeen.witterung.shared]
+        # Push-Token für Live-Aktivitäten (Start und Updates über APNs vom Server). Beim
+        # Export für TestFlight setzt Xcode „production“ ein.
+        aps-environment: development
     info:
       path: DerivedInfo/Witterung-Info.plist
       properties:
@@ -65,8 +68,10 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         # Termine draußen („Regen zu …“), nur nach Einschalten in den Einstellungen.
         NSCalendarsFullAccessUsageDescription: "Witterung prüft das Wetter zu deinen Terminen draußen. Die Termine bleiben auf dem Gerät."
-        # Live-Aktivität „Regen in …“ (Sperrbildschirm, Dynamic Island).
+        # Live-Aktivitäten Regen und Unwetter (Sperrbildschirm, Dynamic Island).
         NSSupportsLiveActivities: true
+        # Regen-Countdown: der Server aktualisiert mit dem Radar (alle 10 min).
+        NSSupportsLiveActivitiesFrequentUpdates: true
         # Lokaler Dev-Server über http://localhost
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

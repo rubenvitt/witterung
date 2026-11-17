@@ -63,12 +63,21 @@ Per Env nur der Bootstrap; Orte und alles Weitere werden in der App eingestellt.
 | `WITTERUNG_DEV_AUTH` | nur lokal: Anmeldung ohne Pocket ID über localhost |
 | `WITTERUNG_WEATHERKIT_KEY_FILE` (oder `_KEY`), `_KEY_ID`, `_TEAM_ID`, `_SERVICE_ID` | WeatherKit, alle vier oder keiner |
 | `WITTERUNG_PIRATE_WEATHER_KEY` (oder `_KEY_FILE`) | Pirate Weather |
+| `WITTERUNG_APNS_KEY_FILE` (oder `_KEY`), `_KEY_ID`, `_TEAM_ID`, `_TOPIC` | Live-Aktivitäten per APNs, die ersten drei zusammen oder keiner; `_TOPIC` = Bundle-ID, Standard `dev.rubeen.witterung` |
 | `WITTERUNG_JEV_KEY` (oder `_KEY_FILE`), `_MODEL` | Jev (TypeSafe) ordnet die Hinweise von „Im Blick“, siehe [docs/api.md](docs/api.md#entscheidung-jev); Standardmodell `jev-latest` |
 
 Open-Meteo und Bright Sky laufen ohne Zugang. Für WeatherKit den `.p8`-Schlüssel nach
 `~/server/witterung/secrets/weatherkit.p8` legen (lesbar für uid 10001), in der Compose-Datei
 `./secrets/weatherkit.p8:/run/secrets/weatherkit.p8:ro` einhängen und die vier Variablen
 setzen. Ein kaputter Schlüssel lässt den Server gar nicht erst starten.
+
+Für Live-Aktivitäten, die der Server auch bei geschlossener App startet und aktualisiert,
+braucht er einen APNs-Schlüssel: im Apple-Developer-Konto unter Keys einen Schlüssel mit
+„Apple Push Notifications service (APNs)“ anlegen (ein vorhandener WeatherKit-Schlüssel geht,
+wenn APNs dort angehakt ist), als `secrets/apns.p8` ablegen und wie den WeatherKit-Schlüssel
+einhängen, dann `WITTERUNG_APNS_KEY_FILE=/run/secrets/apns.p8`, `_KEY_ID` und `_TEAM_ID`
+setzen. Die App-ID `dev.rubeen.witterung` braucht dafür die Capability Push Notifications.
+Ohne Schlüssel startet die App die Aktivität selbst, nur solange sie offen ist.
 
 Orte und Push lassen sich in der App bzw. Web-App einstellen; ohne Oberfläche geht es auf
 dem Server per `docker exec`:
