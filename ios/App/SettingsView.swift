@@ -50,7 +50,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Termine")
                 } footer: {
-                    Text("Termine mit Ort oder draußen (z. B. Hundeschule, Training) der nächsten 36 Stunden bekommen Hinweise wie „Regen zu …“. Termine bleiben auf dem Gerät; Jev sieht nur „Termin draußen um 15:00“, nie den Namen.")
+                    Text("Termine mit Ort oder draußen (z. B. Hundeschule, Training) der nächsten 36 Stunden bekommen Hinweise wie „Regen zu …“. Termine bleiben auf dem Gerät; zum Server geht nur „Termin draußen um 15:00“, nie der Name.")
                 }
 
                 Section {
@@ -74,7 +74,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Gelernt")
                 } footer: {
-                    Text("Häufig Angetipptes rückt etwas nach vorn. Verblasst nach einigen Wochen und bleibt auf dem Gerät; Jev bekommt nur die Kurzfassung oben.")
+                    Text("Häufig Angetipptes rückt etwas nach vorn. Verblasst nach einigen Wochen und bleibt auf dem Gerät; zum Server geht nur die Kurzfassung oben.")
                 }
 
                 Section("Info") {

@@ -155,12 +155,13 @@ pub struct LiveState {
     pub severity: Option<String>,
     /// Stand der Daten (Unix-Sekunden).
     pub updated_at: i64,
-    /// Radar ab dem laufenden 5-min-Schritt, eine Stunde (mm/h, 12 Werte); leer bei Warnungen.
+    /// Radar ab dem laufenden 5-min-Schritt bis zum Ende des Nowcasts (mm/h, höchstens
+    /// 24 Werte = 2 h), für das Diagramm; leer bei Warnungen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub bars: Vec<f64>,
-    /// Beginn des ersten Balkens (Unix-Sekunden).
+    pub series: Vec<f64>,
+    /// Zeitpunkt des ersten Werts (Unix-Sekunden).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bars_start: Option<i64>,
+    pub series_start: Option<i64>,
     /// Regnet es über das Radar hinaus: erste trockene Stunde laut Konsens (Unix-Sekunden).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dry_at: Option<i64>,
@@ -200,8 +201,8 @@ pub fn event_title(event: &str) -> String {
         .join(" ")
 }
 
-/// So viele 5-min-Balken zeigt die Aktivität (eine Stunde).
-const BARS: usize = 12;
+/// So viele 5-min-Werte zeigt das Diagramm (zwei Stunden).
+const SERIES: usize = 24;
 
 /// Was die Aktivität jetzt zeigen soll; `None` = keine Aktivität. `hourly` ist der
 /// Stundenniederschlag laut Konsens (`(Stunde, mm)`), für das Ende hinter dem Radar.
@@ -230,8 +231,8 @@ pub fn desired(
                 event: Some(a.event.clone()),
                 severity: Some(a.severity.clone()),
                 updated_at: now.as_second(),
-                bars: Vec::new(),
-                bars_start: None,
+                series: Vec::new(),
+                series_start: None,
                 dry_at: None,
             },
             key: format!("alert:{}", a.id),
@@ -263,9 +264,9 @@ pub fn desired(
         .map(|p| p.precip_mm_h)
         .fold(0.0, f64::max);
     let round = |v: f64| (v * 10.0).round() / 10.0;
-    let bars = points[current..]
+    let series = points[current..]
         .iter()
-        .take(BARS)
+        .take(SERIES)
         .map(|p| round(p.precip_mm_h))
         .collect();
     // Kein Ende im Radar: erste trockene Stunde danach laut Konsens (höchstens 12 h).
@@ -290,8 +291,8 @@ pub fn desired(
             event: None,
             severity: None,
             updated_at: now.as_second(),
-            bars,
-            bars_start: Some(points[current].at.as_second()),
+            series,
+            series_start: Some(points[current].at.as_second()),
             dry_at,
         },
         key: "rain".into(),
@@ -319,19 +320,19 @@ pub fn change(old: Option<&LiveState>, new: &LiveState, now: Timestamp) -> Chang
         (Some(a), Some(b)) => (a - b).abs() >= SHIFT_S,
         (a, b) => a.is_some() != b.is_some(),
     };
-    // Die Balken rücken alle 5 min weiter; ein neuer Radarlauf ändert ihre Höhe.
-    let bars_moved = old.bars_start != new.bars_start
-        || old.bars.len() != new.bars.len()
+    // Das Diagramm rückt alle 5 min weiter; ein neuer Radarlauf ändert die Werte.
+    let series_moved = old.series_start != new.series_start
+        || old.series.len() != new.series.len()
         || old
-            .bars
+            .series
             .iter()
-            .zip(&new.bars)
+            .zip(&new.series)
             .any(|(a, b)| (a - b).abs() >= 0.3 || (*a >= WET_MM_H) != (*b >= WET_MM_H));
     if shifted(Some(old.starts_at), Some(new.starts_at))
         || shifted(old.ends_at, new.ends_at)
         || shifted(old.dry_at, new.dry_at)
         || intensity(old.peak_mm_h) != intensity(new.peak_mm_h)
-        || bars_moved
+        || series_moved
     {
         return Change::Minor;
     }
@@ -877,14 +878,14 @@ mod tests {
     }
 
     #[test]
-    fn bars_for_the_next_hour_and_dry_hour_after_the_radar() {
+    fn series_until_the_radar_ends_and_dry_hour_after() {
         let t0 = t("2026-11-17T12:00:00Z");
         let n = nowcast(t0, &[0.04, 0.0, 0.33, 1.26, 0.0]);
         let d = desired(&[], Some(&n), &[], t0 + SignedDuration::from_mins(6)).unwrap();
         // Ab dem laufenden Schritt (12:05), gerundet.
-        assert_eq!(d.state.bars, vec![0.0, 0.3, 1.3, 0.0]);
+        assert_eq!(d.state.series, vec![0.0, 0.3, 1.3, 0.0]);
         assert_eq!(
-            d.state.bars_start,
+            d.state.series_start,
             Some((t0 + SignedDuration::from_mins(5)).as_second())
         );
         assert_eq!(d.state.dry_at, None);
@@ -900,7 +901,7 @@ mod tests {
         ];
         let d = desired(&[], Some(&n), &hourly, t0).unwrap();
         assert_eq!(d.state.kind, Kind::Raining);
-        assert_eq!(d.state.bars.len(), 12);
+        assert_eq!(d.state.series.len(), 24);
         assert_eq!(d.state.dry_at, Some(hour(4).as_second()));
         let (_, body) = alert_text("Uelzen", &d.state, t0);
         assert_eq!(body, "Trocken ab etwa 17 Uhr.");
@@ -955,8 +956,8 @@ mod tests {
             event: None,
             severity: None,
             updated_at: now.as_second(),
-            bars: Vec::new(),
-            bars_start: None,
+            series: Vec::new(),
+            series_start: None,
             dry_at: None,
         };
         let later = now + SignedDuration::from_mins(10);
@@ -1006,8 +1007,8 @@ mod tests {
             event: None,
             severity: None,
             updated_at: now.as_second(),
-            bars: Vec::new(),
-            bars_start: None,
+            series: Vec::new(),
+            series_start: None,
             dry_at: None,
         };
         let p = payload("start", &place, Some(&state), true, now);
@@ -1043,8 +1044,8 @@ mod tests {
             event: Some("ORKANARTIGE BÖEN".into()),
             severity: Some("severe".into()),
             updated_at: now.as_second(),
-            bars: Vec::new(),
-            bars_start: None,
+            series: Vec::new(),
+            series_start: None,
             dry_at: None,
         };
         let (title, body) = alert_text("Uelzen", &s, now);

@@ -1,11 +1,12 @@
 #if os(iOS)
 import ActivityKit
+import Charts
 import SwiftUI
 import WidgetKit
 
 /// Sperrbildschirm und Dynamic Island für die Live-Aktivität (`WeatherActivityAttributes`).
 /// Oben eine Zeile, die die Frage beantwortet („Trocken in 12:34“, „Regen bis ca. 21 Uhr“),
-/// darunter die Radarbalken der nächsten Stunde. Bei Warnungen Ereignis und Zeitraum.
+/// darunter die Regenkurve der nächsten zwei Stunden. Bei Warnungen Ereignis und Zeitraum.
 struct WeatherActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: WeatherActivityAttributes.self) { context in
@@ -35,8 +36,8 @@ struct WeatherActivityWidget: Widget {
                         .lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    if let bars = state.bars, !bars.isEmpty {
-                        RainBars(state: state, height: 34)
+                    if let series = state.series, !series.isEmpty {
+                        RainChart(state: state, height: 40, showsAxis: false)
                     } else {
                         Text(state.detail()).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -132,48 +133,52 @@ private struct CompactValue: View {
     }
 }
 
-/// Radar der nächsten Stunde in 5-min-Balken; trockene Schritte als flache Striche.
-private struct RainBars: View {
+/// Regenmenge der nächsten zwei Stunden (Radar, 5-min-Werte) als Fläche über die Zeit.
+/// Wurzelskala bis 8 mm/h: leichter Regen bleibt sichtbar, Starkregen sprengt nichts.
+private struct RainChart: View {
     let state: WeatherActivityAttributes.ContentState
-    var height: CGFloat = 44
+    var height: CGFloat = 52
+    var showsAxis = true
 
-    private var bars: [Double] {
-        let values = state.bars ?? []
-        let count = WeatherActivityAttributes.ContentState.barCount
-        return values + Array(repeating: -1, count: max(0, count - values.count))
+    private struct Point: Identifiable {
+        let at: Date
+        let level: Double
+        var id: Date { at }
     }
 
-    /// Wurzel-Skala bis 8 mm/h: leichter Regen bleibt sichtbar, Starkregen sprengt nichts.
-    private func level(_ v: Double) -> CGFloat {
-        guard v >= NowcastSummary.threshold else { return 0.06 }
-        return max(0.15, min(1, CGFloat((v / 8).squareRoot())))
+    private var points: [Point] {
+        guard let values = state.series, let start = state.seriesStart else { return [] }
+        return values.enumerated().map { i, v in
+            Point(at: Date(timeIntervalSince1970: start + Double(i) * 300),
+                  level: v < NowcastSummary.threshold ? 0 : max(0.08, min(1, (v / 8).squareRoot())))
+        }
     }
 
     var body: some View {
-        VStack(spacing: Spacing.xxs) {
-            HStack(alignment: .bottom, spacing: 3) {
-                ForEach(Array(bars.enumerated()), id: \.offset) { _, v in
-                    Capsule()
-                        .fill(state.tint.opacity(v < 0 ? 0 : v >= NowcastSummary.threshold ? 1 : 0.3))
-                        .frame(height: max(3, height * level(v)))
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .frame(height: height, alignment: .bottom)
-            if let start = state.barsStart.map(Date.init(timeIntervalSince1970:)) {
-                HStack(spacing: 0) {
-                    ForEach(0..<4) { i in
-                        Text(Fmt.time(start.addingTimeInterval(Double(i) * 900)))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    Text("DWD").opacity(0.7)
-                }
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
+        let points = points
+        Chart(points) { p in
+            AreaMark(x: .value("Zeit", p.at), y: .value("Regen", p.level))
+                .interpolationMethod(.monotone)
+                .foregroundStyle(LinearGradient(colors: [state.tint.opacity(0.55), state.tint.opacity(0.1)],
+                                                startPoint: .top, endPoint: .bottom))
+            LineMark(x: .value("Zeit", p.at), y: .value("Regen", p.level))
+                .interpolationMethod(.monotone)
+                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+                .foregroundStyle(state.tint)
+        }
+        .chartYScale(domain: 0...1)
+        .chartYAxis(.hidden)
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .minute, count: 30)) { _ in
+                AxisGridLine().foregroundStyle(.white.opacity(0.15))
+                AxisValueLabel(format: .dateTime.hour().minute())
+                    .foregroundStyle(.white.opacity(0.6))
             }
         }
+        .chartXAxis(showsAxis ? .visible : .hidden)
+        .frame(height: height)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Regenradar der nächsten Stunde")
+        .accessibilityLabel("Regen in den nächsten zwei Stunden")
     }
 }
 
@@ -199,8 +204,8 @@ private struct WeatherActivityLockView: View {
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.75))
                 .lineLimit(1)
-            if let bars = state.bars, !bars.isEmpty {
-                RainBars(state: state)
+            if let series = state.series, !series.isEmpty {
+                RainChart(state: state)
             }
         }
         .foregroundStyle(.white)

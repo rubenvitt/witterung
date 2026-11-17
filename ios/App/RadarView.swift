@@ -1,15 +1,30 @@
 import MapKit
 import SwiftUI
 
+/// Fehler beim Laden der Radarbilder, damit die Karte nicht stumm leer bleibt.
+@MainActor @Observable
+final class RadarTileErrors {
+    private(set) var message: String?
+    private(set) var loaded = 0
+
+    func failed(_ text: String) { if loaded == 0 { message = text } }
+    func succeeded() {
+        loaded += 1
+        message = nil
+    }
+}
+
 final class RadarTileOverlay: MKTileOverlay {
     let base: URL
     let layer: String
     let time: Date
+    let errors: RadarTileErrors
 
-    init(base: URL, layer: String, time: Date) {
+    init(base: URL, layer: String, time: Date, errors: RadarTileErrors) {
         self.base = base
         self.layer = layer
         self.time = time
+        self.errors = errors
         super.init(urlTemplate: WMSTile.template(base: base, layer: layer, time: time))
         tileSize = CGSize(width: 256, height: 256)
         canReplaceMapContent = false
@@ -18,6 +33,32 @@ final class RadarTileOverlay: MKTileOverlay {
     override func url(forTilePath path: MKTileOverlayPath) -> URL {
         // Doppelte Auflösung für Retina-Displays.
         WMSTile.url(base: base, layer: layer, time: time, x: path.x, y: path.y, z: path.z, pixels: 256 * Int(path.contentScaleFactor.rounded()))
+    }
+
+    /// Selbst laden: Mit gesetztem `urlTemplate` holt MapKit die Kacheln sonst direkt über das
+    /// Template (eindeutiger Cache-Schlüssel, aber keine gültige WMS-Anfrage) und die Karte
+    /// bleibt leer. Kommt kein Bild zurück, steht der Grund unter der Karte.
+    override func loadTile(at path: MKTileOverlayPath) async throws -> Data {
+        let url = url(forTilePath: path)
+        let errors = errors
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(from: url)
+        } catch {
+            if (error as? URLError)?.code != .cancelled {
+                await errors.failed("Radarbilder laden nicht: \(error.localizedDescription)")
+            }
+            throw error
+        }
+        let http = response as? HTTPURLResponse
+        guard http?.statusCode == 200, http?.mimeType?.hasPrefix("image/") == true else {
+            let status = http?.statusCode ?? 0
+            await errors.failed(status == 200 ? "Radarbilder: Antwort ist kein Bild" : "Radarbilder: Fehler \(status)")
+            throw URLError(.badServerResponse)
+        }
+        await errors.succeeded()
+        return data
     }
 }
 
@@ -30,11 +71,13 @@ struct RadarView: View {
     @State private var index = 0
     @State private var playing = false
     @State private var error: String?
+    @State private var tileErrors = RadarTileErrors()
 
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                RadarMap(center: model.coordinate(ref), radar: radar, frame: radar.map { $0.frames[min(index, $0.frames.count - 1)] })
+                RadarMap(center: model.coordinate(ref), radar: radar, frame: radar.map { $0.frames[min(index, $0.frames.count - 1)] },
+                         errors: tileErrors)
                     .ignoresSafeArea()
                 controls
             }
@@ -72,12 +115,14 @@ struct RadarView: View {
                 }
                 FrameSlider(frames: radar.frames, nowIndex: radar.lastMeasured, index: $index)
                 RadarLegend()
+                if let message = tileErrors.message {
+                    Label(message, systemImage: "exclamationmark.triangle").font(.footnote)
+                }
             } else if let error {
                 Label(error, systemImage: "exclamationmark.triangle").font(.footnote)
             } else {
                 ProgressView().frame(maxWidth: .infinity)
             }
-            Text("Radar: Deutscher Wetterdienst").font(.caption2).foregroundStyle(.secondary)
         }
         .padding(Layout.cardPadding)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Layout.cardRadius + 2, style: .continuous))
@@ -173,6 +218,7 @@ private struct RadarMap: UIViewRepresentable {
     let center: CLLocationCoordinate2D?
     let radar: RadarInfo?
     let frame: Date?
+    let errors: RadarTileErrors
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -190,7 +236,7 @@ private struct RadarMap: UIViewRepresentable {
 
     func updateUIView(_ map: MKMapView, context: Context) {
         guard let radar, let frame, context.coordinator.current?.time != frame else { return }
-        let overlay = RadarTileOverlay(base: radar.wms, layer: radar.layer, time: frame)
+        let overlay = RadarTileOverlay(base: radar.wms, layer: radar.layer, time: frame, errors: errors)
         map.addOverlay(overlay, level: .aboveRoads)
         let old = context.coordinator.current
         context.coordinator.current = overlay
