@@ -75,6 +75,12 @@ struct API: Sendable {
         try await JSONDecoder.api.decode(RadarInfo.self, from: send("GET", "/api/v1/radar"))
     }
 
+    /// Radar- oder Warnungsbild (PNG) über den Server. Lange Zeitüberschreitung: Holt der
+    /// Server ein Bild erst jetzt beim DWD, dauert das bis zu 30 s.
+    func image(_ path: String) async throws -> Data {
+        try await send("GET", path, timeout: 75)
+    }
+
     // MARK: Live-Aktivitäten (docs/api.md)
 
     /// Meldet Push-to-Start-Token und Ort (fehlende Werte behält der Server). Antwort: ob der
@@ -110,10 +116,11 @@ struct API: Sendable {
 
     // MARK: Transport
 
-    func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil, authorized: Bool = true) async throws -> Data {
+    func send(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil, authorized: Bool = true,
+              timeout: TimeInterval = 20) async throws -> Data {
         var url = baseURL.appending(path: path)
         if !query.isEmpty { url.append(queryItems: query) }
-        var request = URLRequest(url: url, timeoutInterval: 20)
+        var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method
         request.setValue(Self.client, forHTTPHeaderField: "X-Witterung-Client")
         request.setValue("application/json", forHTTPHeaderField: "Accept")

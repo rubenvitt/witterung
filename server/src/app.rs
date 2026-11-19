@@ -21,6 +21,7 @@ struct Inner {
     oidc: Option<Arc<OidcClient>>,
     http: reqwest::Client,
     decisions: crate::decide::DecisionCache,
+    radar: crate::radar::RadarCache,
     apns: Option<crate::live::Apns>,
 }
 
@@ -67,6 +68,7 @@ impl App {
                 oidc,
                 http,
                 decisions: Default::default(),
+                radar: Default::default(),
             }),
         })
     }
@@ -86,6 +88,11 @@ impl App {
     /// Cached Jev answers (`decide.rs`).
     pub fn decisions(&self) -> &crate::decide::DecisionCache {
         &self.inner.decisions
+    }
+
+    /// Radar and warning images (`radar.rs`).
+    pub fn radar(&self) -> &crate::radar::RadarCache {
+        &self.inner.radar
     }
 
     /// APNs for Live Activities; `None` without credentials.

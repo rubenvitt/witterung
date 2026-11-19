@@ -16,6 +16,7 @@ pub mod oauth;
 pub mod poller;
 pub mod push;
 pub mod quota;
+pub mod radar;
 pub mod sources;
 pub mod web;
 
@@ -49,7 +50,9 @@ pub fn build(config: Config, http: reqwest::Client) -> anyhow::Result<(App, Rout
         .route("/api/v1/places/{id}/forecast", get(api::place_forecast))
         .route("/api/v1/forecast", get(api::location_forecast))
         .route("/api/v1/status", get(api::status))
-        .route("/api/v1/radar", get(api::radar))
+        .route("/api/v1/radar", get(radar::radar))
+        .route("/api/v1/radar/frames/{t}", get(radar::frame_image))
+        .route("/api/v1/radar/warnings", get(radar::warnings_image))
         .route("/api/v1/decide", axum::routing::post(decide::decide))
         .route(
             "/api/v1/devices",
@@ -104,6 +107,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .user_agent(concat!("witterung/", env!("CARGO_PKG_VERSION")))
         .build()?;
     let (app, router) = build(config, http)?;
+    radar::spawn_prefetch(app.clone());
     poller::spawn(app);
     let listener = tokio::net::TcpListener::bind(bind).await?;
     tracing::info!(%bind, "listening");

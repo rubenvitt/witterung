@@ -82,38 +82,37 @@ struct NowcastTests {
     }
 }
 
-struct WMSTileTests {
-    @Test func bboxMath() {
-        let e = WMSTile.earthHalf
-        let z0 = WMSTile.bbox(x: 0, y: 0, z: 0)
-        #expect(z0.minX == -e && z0.minY == -e && z0.maxX == e && z0.maxY == e)
-        let z1 = WMSTile.bbox(x: 1, y: 0, z: 1)
-        #expect(z1.minX == 0 && z1.minY == 0 && z1.maxX == e && z1.maxY == e)
-        // Uelzen bei z8: Kachel 135/83
-        let t = WMSTile.bbox(x: 135, y: 83, z: 8)
-        #expect(abs(t.maxX - t.minX - 2 * e / 256) < 0.001)
-        #expect(t.minX < 1_175_490 && 1_175_490 < t.maxX) // 10,5594° O
-        #expect(t.minY < 6_976_637 && 6_976_637 < t.maxY) // 52,9656° N
+struct RadarGeometryTests {
+    /// Ausschnitt des Servers: 2–18° O, 46–56° N.
+    static let bbox = [222_638.98, 5_780_349.22, 2_003_750.83, 7_558_415.66]
+
+    @Test func mercatorCorners() throws {
+        let c = try #require(RadarGeometry.corners(Self.bbox))
+        #expect(abs(c.northWest.lat - 56) < 1e-6 && abs(c.northWest.lon - 2) < 1e-6)
+        #expect(abs(c.southEast.lat - 46) < 1e-6 && abs(c.southEast.lon - 18) < 1e-6)
+        #expect(RadarGeometry.corners([1, 2, 3]) == nil)
+        #expect(RadarGeometry.corners([5, 0, 1, 1]) == nil)
     }
 
-    @Test func getMapURL() throws {
-        let url = WMSTile.url(base: URL(string: "https://maps.dwd.de/geoserver/dwd/wms")!, layer: "dwd:Radar_rv_product_1x1km_ger",
-                              time: NowcastTests.start, x: 1, y: 0, z: 1, pixels: 512)
-        let items = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
-        let q = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
-        #expect(q["BBOX"] == "0.00,0.00,20037508.34,20037508.34")
-        #expect(q["CRS"] == "EPSG:3857" && q["VERSION"] == "1.3.0" && q["WIDTH"] == "512")
-        #expect(q["TIME"] == "2026-11-09T12:00:00Z")
+    @Test func loadOrderStartsAtTheShownFrame() {
+        #expect(RadarGeometry.loadOrder(count: 5, from: 2) == [2, 3, 1, 4, 0])
+        #expect(RadarGeometry.loadOrder(count: 4, from: 3) == [3, 2, 1, 0])
+        #expect(RadarGeometry.loadOrder(count: 3, from: 9) == [2, 1, 0])
+        #expect(RadarGeometry.loadOrder(count: 0, from: 0).isEmpty)
+        #expect(Set(RadarGeometry.loadOrder(count: 49, from: 24)).count == 49)
     }
 
-    /// MapKit cached Kacheln pro Template: jeder Zeitpunkt braucht ein eigenes.
-    @Test func templatePerFrame() {
-        let base = URL(string: "https://maps.dwd.de/geoserver/dwd/wms")!
-        let layer = "dwd:Radar_rv_product_1x1km_ger"
-        let a = WMSTile.template(base: base, layer: layer, time: NowcastTests.start)
-        let b = WMSTile.template(base: base, layer: layer, time: NowcastTests.start.addingTimeInterval(300))
-        #expect(a != b)
-        #expect(a.contains("2026-11-09T12:00:00Z"))
+    @Test func playbackSkipsMissingFrames() {
+        let loaded: Set<Int> = [0, 3]
+        #expect(RadarGeometry.nextLoaded(after: 0, count: 5) { loaded.contains($0) } == 3)
+        #expect(RadarGeometry.nextLoaded(after: 3, count: 5) { loaded.contains($0) } == 0)
+        #expect(RadarGeometry.nextLoaded(after: 1, count: 5) { _ in false } == nil)
+    }
+
+    @Test func framePath() throws {
+        let json = #"{"bbox":[0,0,1,1],"width":1024,"height":1022,"frame":"/api/v1/radar/frames/{unix}","warnings":"/api/v1/radar/warnings"}"#
+        let image = try JSONDecoder.api.decode(RadarImage.self, from: Data(json.utf8))
+        #expect(image.framePath(NowcastTests.start) == "/api/v1/radar/frames/\(Int(NowcastTests.start.timeIntervalSince1970))")
     }
 }
 

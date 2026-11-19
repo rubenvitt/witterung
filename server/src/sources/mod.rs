@@ -146,6 +146,8 @@ pub struct Endpoints {
     pub bright_sky: Url,
     pub weatherkit: Url,
     pub pirate_weather: Url,
+    /// DWD GeoServer (WMS) for the radar and warning map images.
+    pub dwd_geoserver: Url,
     /// APNs (Live-Aktivitäten), Produktion und Sandbox.
     pub apns: Url,
     pub apns_sandbox: Url,
@@ -159,6 +161,7 @@ impl Default for Endpoints {
             bright_sky: url("https://api.brightsky.dev/"),
             weatherkit: url("https://weatherkit.apple.com/api/v1/"),
             pirate_weather: url("https://api.pirateweather.net/"),
+            dwd_geoserver: url("https://maps.dwd.de/geoserver/dwd/"),
             apns: url("https://api.push.apple.com/"),
             apns_sandbox: url("https://api.sandbox.push.apple.com/"),
         }

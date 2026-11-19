@@ -104,10 +104,24 @@ sobald WeatherKit aktiv ist).
 
 `GET /api/v1/radar` → `{"wms": "https://maps.dwd.de/geoserver/dwd/wms", "layer":
 "dwd:Radar_rv_product_1x1km_ger", "frames": ["2026-11-09T10:00:00Z", …], "now_index": 24,
-"attribution": "Radar: Deutscher Wetterdienst"}` – `now_index` ist das letzte Analysebild,
-danach Vorhersage. Zeitschritte
-(5 min) von −2 h bis +2 h (Vorhersage), für WMS-`TIME`. Kacheln holt der Client direkt beim
-DWD (EPSG:3857, `FORMAT=image/png`, `TRANSPARENT=true`). Quelle: Deutscher Wetterdienst.
+"image": {"bbox": [222638.98, 5780349.22, 2003750.83, 7558415.66], "crs": "EPSG:3857",
+"width": 1024, "height": 1022, "frame": "/api/v1/radar/frames/{unix}", "warnings":
+"/api/v1/radar/warnings"}, "attribution": "Radar und Warnungen: Deutscher Wetterdienst"}` –
+`now_index` ist das letzte Analysebild, danach Vorhersage. Zeitschritte (5 min) von −2 h bis
++2 h (Vorhersage), Ende laut WMS-Capabilities des DWD.
+
+`GET /api/v1/radar/frames/{unix}` → PNG eines Zeitpunkts (`unix` = Sekunden, einer aus
+`frames`, sonst 404) für ganz Deutschland (2–18° O, 46–56° N, `bbox` in Web-Mercator-Metern,
+≈ 1 km je Pixel). `GET /api/v1/radar/warnings` → PNG der aktuellen DWD-Warnungen
+(Gemeinden, zu Flächen gleicher Stufe vereinigt; gelb, orange, rot, violett) über derselben
+`bbox`, 5 min zwischengespeichert. Beide brauchen die Anmeldung.
+
+Warum über den Server: Der DWD-GeoServer rendert jede GetMap-Anfrage neu und braucht dafür
+5–30 s, auch für eine kleine Kachel. Der Server holt deshalb ein Bild je Zeitpunkt, hält alle
+Zeitpunkte im Speicher und lädt sie (6 parallel, vom letzten Analysebild nach außen) vor,
+solange in den letzten 15 min jemand das Radar geöffnet hat. Vorhersagebilder gehören zu
+ihrem Lauf und werden mit dem nächsten Lauf neu geholt. `wms`/`layer` bleiben für Clients,
+die selbst Kacheln holen. Quelle: Deutscher Wetterdienst.
 
 ## Entscheidung (Jev)
 

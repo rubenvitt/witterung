@@ -255,14 +255,30 @@ struct RadarInfo: Decodable, Sendable {
     let frames: [Date]
     /// Letztes Analysebild, danach Vorhersage.
     let nowIndex: Int?
+    /// Ein Bild je Zeitpunkt für ganz Deutschland, über den Server (fehlt bei älteren Servern).
+    let image: RadarImage?
 
     enum CodingKeys: String, CodingKey {
-        case wms, layer, frames
+        case wms, layer, frames, image
         case nowIndex = "now_index"
     }
 
     var lastMeasured: Int {
         nowIndex.map { min(max($0, 0), frames.count - 1) } ?? frames.lastIndex { $0 <= .now } ?? 0
+    }
+}
+
+/// Lage der Radar- und Warnungsbilder: `bbox` in Web-Mercator-Metern (minX, minY, maxX, maxY).
+struct RadarImage: Decodable, Sendable {
+    let bbox: [Double]
+    let width: Int
+    let height: Int
+    /// Pfad mit `{unix}` für den Zeitpunkt in Sekunden.
+    let frame: String
+    let warnings: String
+
+    func framePath(_ time: Date) -> String {
+        frame.replacingOccurrences(of: "{unix}", with: String(Int(time.timeIntervalSince1970.rounded())))
     }
 }
 

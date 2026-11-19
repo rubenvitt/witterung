@@ -3,9 +3,10 @@
 
 Liefert WitterungTests/Fixtures/forecast.json, zeitlich auf „jetzt“ verschoben
 (Stunden ab der laufenden Stunde, Nowcast ab dem laufenden 5-min-Schritt),
-und echte Radar-Zeitschritte für den DWD-WMS. Aufruf: python3 -I scripts/mock-server.py [port]
+und echte Radar-Zeitschritte; Radar- und Warnungsbilder holt er wie der Server beim DWD
+(dauert pro Bild 5–30 s, danach aus dem Speicher). Aufruf: python3 -I scripts/mock-server.py [port]
 """
-import json, re, sys
+import json, re, sys, urllib.parse, urllib.request
 from datetime import datetime, timedelta, timezone, date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,6 +15,9 @@ FIXTURE = Path(__file__).resolve().parent.parent / "WitterungTests" / "Fixtures"
 BASE = datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)
 ISO = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 DAY = re.compile(r"^\d{4}-\d\d-\d\d$")
+GEOSERVER = "https://maps.dwd.de/geoserver/dwd/wms"
+BBOX = [222638.98, 5780349.22, 2003750.83, 7558415.66]  # wie server/src/radar.rs
+images = {}
 places = [{"id": 1, "name": "Uelzen", "lat": 52.9656, "lon": 10.5594, "kind": "saved", "notify": True}]
 
 
@@ -41,7 +45,31 @@ def forecast(name, kind, place_id):
     return doc
 
 
+def dwd_image(layer, time=None):
+    key = (layer, time)
+    if key not in images:
+        q = {"SERVICE": "WMS", "VERSION": "1.3.0", "REQUEST": "GetMap", "LAYERS": layer, "STYLES": "",
+             "CRS": "EPSG:3857", "BBOX": ",".join(f"{v:.2f}" for v in BBOX), "WIDTH": "1024", "HEIGHT": "1022",
+             "FORMAT": "image/png", "TRANSPARENT": "true"}
+        if time:
+            q["TIME"] = time
+        with urllib.request.urlopen(f"{GEOSERVER}?{urllib.parse.urlencode(q)}", timeout=60) as r:
+            if not r.headers.get("Content-Type", "").startswith("image/png"):
+                return None
+            images[key] = r.read()
+    return images[key]
+
+
 class Handler(BaseHTTPRequestHandler):
+    def send_png(self, data):
+        if data is None:
+            return self.send_json(502, {"error": {"code": "upstream", "message": "DWD liefert kein Bild"}})
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def send_json(self, status, body=None):
         data = b"" if body is None else json.dumps(body, ensure_ascii=False).encode()
         self.send_response(status)
@@ -64,10 +92,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/v1/forecast":
             return self.send_json(200, forecast("Uelzen", "current", None))
         if path == "/api/v1/radar":
+            # Wie der Fallback des Servers: Die letzte Analyse ist etwa 10 min alt.
             now = datetime.now(timezone.utc)
-            start = now.replace(minute=now.minute - now.minute % 5, second=0, microsecond=0) - timedelta(hours=2)
-            frames = [(start + timedelta(minutes=5 * i)).strftime("%Y-%m-%dT%H:%M:%SZ") for i in range(49)]
-            return self.send_json(200, {"wms": "https://maps.dwd.de/geoserver/dwd/wms", "layer": "dwd:Radar_rv_product_1x1km_ger", "frames": frames})
+            last = now.replace(minute=now.minute - now.minute % 5, second=0, microsecond=0) - timedelta(minutes=10)
+            frames = [(last + timedelta(minutes=5 * (i - 24))).strftime("%Y-%m-%dT%H:%M:%SZ") for i in range(49)]
+            return self.send_json(200, {"wms": GEOSERVER, "layer": "dwd:Radar_rv_product_1x1km_ger", "frames": frames, "now_index": 24,
+                                        "image": {"bbox": BBOX, "crs": "EPSG:3857", "width": 1024, "height": 1022,
+                                                  "frame": "/api/v1/radar/frames/{unix}", "warnings": "/api/v1/radar/warnings"}})
+        m = re.match(r"^/api/v1/radar/frames/(\d+)$", path)
+        if m:
+            t = datetime.fromtimestamp(int(m[1]), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            return self.send_png(dwd_image("dwd:Radar_rv_product_1x1km_ger", t))
+        if path == "/api/v1/radar/warnings":
+            return self.send_png(dwd_image("dwd:Warnungen_Gemeinden_vereinigt"))
         self.send_json(404, {"error": {"code": "not_found", "message": path}})
 
     def do_POST(self):

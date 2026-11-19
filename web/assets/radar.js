@@ -1,4 +1,5 @@
-// Radar map: DWD WMS (RV product) over OpenStreetMap, time slider with play.
+// Radar map: one DWD image per frame (fetched and cached by the server) over OpenStreetMap,
+// time slider with play, DWD warnings as areas.
 
 import { api, h, icon, time, errorBox } from '/assets/util.js';
 import { resolvePlace, placeBar, geolocate, HERE } from '/assets/app.js';
@@ -6,6 +7,16 @@ import { resolvePlace, placeBar, geolocate, HERE } from '/assets/app.js';
 const GERMANY = { lat: 51.2, lon: 10.4, zoom: 6 };
 const RADAR_OPACITY = 0.75;
 const PLAY_MS = 700;
+const WARNINGS_OPACITY = 0.5;
+const WARNING_LEVELS = [
+  ['Warnung', '#ffff00'], ['markant', '#faa800'], ['Unwetter', '#ff2b00'], ['extrem', '#b00064'],
+];
+
+/** Web Mercator metres → [lat, lon]. */
+const toLatLon = (x, y) => {
+  const r = 6378137;
+  return [Math.atan(Math.sinh(y / r)) * 180 / Math.PI, x / r * 180 / Math.PI];
+};
 
 export async function renderRadar(root, param) {
   const { key, place, places } = await resolvePlace(param);
@@ -32,6 +43,8 @@ export async function renderRadar(root, param) {
 
   const mapEl = h('div', { class: 'map', role: 'region', 'aria-label': 'Radarkarte' });
   const label = h('output', { class: 'frame-label', 'aria-live': 'off' });
+  const loading = h('span', { class: 'muted small' });
+  const warningsBox = h('input', { type: 'checkbox', checked: true });
   const slider = h('input', {
     type: 'range', min: '0', max: String(frames.length - 1), step: '1', value: String(current),
     id: 'radar-time', 'aria-describedby': 'radar-hint',
@@ -56,6 +69,11 @@ export async function renderRadar(root, param) {
             h('span', null, 'jetzt'),
             h('span', null, time(frames[frames.length - 1])))),
         label),
+      h('div', { class: 'radar-options' },
+        h('label', null, warningsBox, ' Warnungen'),
+        h('span', { class: 'legend', 'aria-hidden': 'true' },
+          ...WARNING_LEVELS.map(([name, color]) => h('span', { class: 'key', style: `--key:${color}` }, name))),
+        loading),
       h('p', { id: 'radar-hint', class: 'muted small' },
         'Dunkler Teil der Zeitleiste: gemessen, heller Teil: Vorhersage (Nowcast). Bilder: DWD-Radarkomposit RV, 5-Minuten-Schritte.'),
       h('details', { class: 'table-details' },
@@ -74,29 +92,50 @@ export async function renderRadar(root, param) {
     className: 'osm-tiles',
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende',
   }).addTo(map);
-  map.attributionControl.addAttribution('Radar: <a href="https://www.dwd.de/">Deutscher Wetterdienst</a>');
+  map.attributionControl.addAttribution('Radar und Warnungen: <a href="https://www.dwd.de/">Deutscher Wetterdienst</a>');
   if (center !== GERMANY) {
     window.L.circleMarker([center.lat, center.lon], { radius: 6, weight: 2, className: 'place-marker' }).addTo(map);
   }
 
-  // One WMS layer per frame, created on demand: switching opacity does not flicker,
-  // swapping TIME on a single layer would.
-  // shortcut: layers are never evicted; fine for 49 frames, revisit if frames get many more.
+  // One image overlay per frame, created on demand: switching opacity does not flicker.
+  // The server answers with one image for all of Germany (the DWD needs 5–30 s per request,
+  // so 49 frames as tiles never finished); older servers without `image` fall back to WMS tiles.
+  const img = radar.image;
+  const bounds = img && [toLatLon(img.bbox[0], img.bbox[1]), toLatLon(img.bbox[2], img.bbox[3])];
   const layers = new Map();
+  const loaded = new Set();
+  const updateLoading = () => {
+    loading.textContent = loaded.size < frames.length ? `Radarbilder: ${loaded.size} von ${frames.length}` : '';
+  };
   const layerFor = (i) => {
     if (!layers.has(i)) {
-      layers.set(i, window.L.tileLayer.wms(radar.wms, {
-        layers: radar.layer,
-        version: '1.3.0',
-        format: 'image/png',
-        transparent: true,
-        TIME: frames[i],
-        opacity: 0,
-        zIndex: 10,
-      }).addTo(map));
+      const layer = img
+        ? window.L.imageOverlay(img.frame.replace('{unix}', String(Math.round(new Date(frames[i]) / 1000))), bounds,
+          { opacity: 0, zIndex: 10, className: 'radar-image' })
+        : window.L.tileLayer.wms(radar.wms, {
+          layers: radar.layer, version: '1.3.0', format: 'image/png', transparent: true,
+          TIME: frames[i], opacity: 0, zIndex: 10,
+        });
+      layer.on('load', () => { loaded.add(i); updateLoading(); });
+      layers.set(i, layer.addTo(map));
     }
     return layers.get(i);
   };
+
+  if (img) {
+    const warnings = window.L.imageOverlay(img.warnings, bounds, { opacity: WARNINGS_OPACITY, zIndex: 5 });
+    const toggleWarnings = () => (warningsBox.checked ? warnings.addTo(map) : warnings.remove());
+    warningsBox.addEventListener('change', toggleWarnings);
+    toggleWarnings();
+    // Load everything up front, nearest to "now" first; the server keeps the images.
+    for (let d = 0; d < frames.length; d += 1) {
+      if (nowIndex + d < frames.length) layerFor(nowIndex + d);
+      if (d > 0 && nowIndex - d >= 0) layerFor(nowIndex - d);
+    }
+  } else {
+    warningsBox.closest('.radar-options').hidden = true;
+  }
+  updateLoading();
 
   const show = (i) => {
     current = i;
@@ -120,7 +159,9 @@ export async function renderRadar(root, param) {
     playBtn.replaceChildren(icon('pause'));
     playBtn.setAttribute('aria-label', 'Anhalten');
     timer = setInterval(() => {
-      const next = (current + 1) % frames.length;
+      // Skip frames that have not arrived yet instead of showing an empty map.
+      let next = (current + 1) % frames.length;
+      for (let k = 0; img && k < frames.length && !loaded.has(next); k += 1) next = (next + 1) % frames.length;
       layerFor((next + 1) % frames.length); // preload the frame after
       show(next);
     }, PLAY_MS);
