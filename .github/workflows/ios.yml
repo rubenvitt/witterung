@@ -33,11 +33,15 @@ concurrency:
 permissions:
   contents: read
 
+# Ab April 2027 nimmt App Store Connect nur noch Builds mit dem iOS-27-SDK an (ITMS-90725).
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+
 jobs:
   check:
     name: iOS (unsigniert, Tests)
     if: github.event_name == 'pull_request'
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 30
     defaults:
       run:
@@ -65,7 +69,7 @@ jobs:
   testflight:
     name: iOS (TestFlight)
     if: github.event_name != 'pull_request'
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 45
     defaults:
       run:
