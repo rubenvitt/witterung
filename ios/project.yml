@@ -203,7 +203,7 @@ targets:
       - path: WitterungTests
       - path: Shared
       - path: App/Auth.swift
-      - path: App/WMSTile.swift
+      - path: App/RadarGeometry.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.rubeen.witterung.tests

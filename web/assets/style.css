@@ -395,6 +395,10 @@ table.data { border-collapse: separate; border-spacing: 0; font-size: 0.85rem; w
 .map { height: min(62vh, 560px); min-height: 320px; background: var(--surface-2); }
 .leaflet-container { font: inherit; font-size: 0.8rem; }
 .place-marker { stroke: var(--surface); fill: var(--accent); fill-opacity: 1; }
+.radar-options {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; padding: 0 1rem 0.75rem; font-size: 0.85rem;
+}
+.radar-options .key::before { background: var(--key); opacity: 0.8; }
 .radar-controls {
   display: grid; grid-template-columns: auto 1fr auto; gap: 0.75rem; align-items: center;
   padding: 0.75rem 1rem;

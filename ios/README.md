@@ -131,7 +131,7 @@ ios/
 │   ├── RootView.swift    Blättern zwischen Orten, Leiste unten, Anmeldeseite
 │   ├── PlaceView.swift, Sections.swift   Ortsseite und ihre Karten
 │   ├── ComparisonView.swift   Quellenvergleich und Quellenstatus
-│   ├── RadarView.swift, WMSTile.swift    Radarkarte mit WMS-Kacheln
+│   ├── RadarView.swift, RadarGeometry.swift  Radarkarte: Bilder je Zeitpunkt, Warnungen
 │   └── PlacesView.swift, SettingsView.swift, AttributionView.swift
 ├── Widgets/           Widget-Extension (App Intent, Timeline-Provider), auch für die Watch
 ├── Watch/             Watch-App (Modell, Ansichten, WatchConnectivity)
