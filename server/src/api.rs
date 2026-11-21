@@ -126,11 +126,39 @@ pub async fn place_forecast(
     State(app): State<App>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Forecast>> {
-    let place = app
-        .blocking(move |c| db::find_place(c, id))
+    let (place, empty) = app
+        .blocking(move |c| {
+            let Some(place) = db::find_place(c, id)? else {
+                return Ok(None);
+            };
+            let empty = db::snapshots(c, place.id)?.is_empty();
+            Ok(Some((place, empty)))
+        })
         .await?
         .ok_or(AppError::NotFound)?;
+    // A new place has nothing until the poller comes by; fetch the free
+    // sources now instead of answering with an empty forecast.
+    if empty {
+        poll_free_sources(&app, &place).await;
+    }
     Ok(Json(forecast_for(&app, place).await?))
+}
+
+/// The sources without a quota, fetched right away for a place without data.
+async fn poll_free_sources(app: &App, place: &Place) {
+    poller::poll_place(
+        app,
+        place,
+        &[
+            Provider::OpenMeteo,
+            Provider::BrightSky,
+            Provider::DwdObservation,
+            Provider::DwdAlerts,
+            Provider::DwdRadar,
+        ],
+        Timestamp::now(),
+    )
+    .await;
 }
 
 #[derive(Deserialize)]
@@ -163,19 +191,7 @@ pub async fn forecast_at(app: &App, lat: f64, lon: f64) -> AppResult<Forecast> {
         })
         .await?;
     if empty {
-        poller::poll_place(
-            app,
-            &place,
-            &[
-                Provider::OpenMeteo,
-                Provider::BrightSky,
-                Provider::DwdObservation,
-                Provider::DwdAlerts,
-                Provider::DwdRadar,
-            ],
-            Timestamp::now(),
-        )
-        .await;
+        poll_free_sources(app, &place).await;
     }
     forecast_for(app, place).await
 }

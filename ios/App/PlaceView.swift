@@ -13,9 +13,12 @@ struct AttributionRoute: Hashable {
 struct PlaceView: View {
     @Environment(AppModel.self) private var model
     let ref: PlaceRef
+    /// Nach einer Minute ohne Daten nicht mehr „lädt“ anzeigen.
+    @State private var gaveUp = false
 
     var body: some View {
-        let forecast = model.forecasts[ref]
+        // Eine Vorhersage ohne Werte (neuer Ort, Quellen noch nicht abgefragt) zählt als „lädt“.
+        let forecast = model.forecasts[ref].flatMap { $0.hasData ? $0 : nil }
         ScrollViewReader { proxy in
         ScrollView {
             VStack(spacing: Layout.sectionSpacing) {
@@ -71,9 +74,7 @@ struct PlaceView: View {
                 .ignoresSafeArea()
         }
         .foregroundStyle(.white)
-        .task(id: ref) {
-            if forecast == nil { await model.refresh(ref) }
-        }
+        .task(id: ref) { await loadUntilData() }
     }
 
     @ViewBuilder
@@ -96,6 +97,20 @@ struct PlaceView: View {
         }
     }
 
+    private var hasData: Bool { model.forecasts[ref]?.hasData == true }
+
+    /// Lädt, und fragt bei einem neuen Ort nach, bis der Server Werte hat.
+    private func loadUntilData() async {
+        gaveUp = false
+        if !hasData { await model.refresh(ref) }
+        for _ in 0..<12 where !hasData && model.failures[ref] == nil {
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            await model.refresh(ref)
+        }
+        gaveUp = !hasData
+    }
+
     @ViewBuilder private var placeholder: some View {
         VStack(spacing: Spacing.l) {
             Text(model.title(ref)).font(.largeTitle)
@@ -104,6 +119,9 @@ struct PlaceView: View {
             } else if ref == .current, model.location.coordinate == nil {
                 ProgressView()
                 Text("Standort wird ermittelt …").foregroundStyle(.secondary)
+            } else if gaveUp {
+                ContentUnavailableView("Noch keine Wetterdaten", systemImage: "hourglass",
+                                       description: Text("Die Quellen haben für diesen Ort noch nicht geantwortet. Zum Aktualisieren nach unten ziehen."))
             } else {
                 ProgressView()
                 Text("Wetter wird geladen …").foregroundStyle(.secondary)
