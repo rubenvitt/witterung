@@ -174,6 +174,9 @@ extension Forecast {
     /// Konsens der Stunde von jetzt (auch aus einem älteren Cache), sonst `now.forecast`.
     var currentHour: HourPoint? { hour(at: .now)?.consensus ?? now.forecast }
 
+    /// Ein neuer Ort hat noch keine Werte, solange keine Quelle geantwortet hat.
+    var hasData: Bool { !hourly.isEmpty }
+
     var hasWeatherKit: Bool { sources.contains { $0.source == "weatherkit" && $0.ok } }
 
     /// Kurzer Regenhinweis für Widgets: Radar, wenn es `date` abdeckt, sonst Stunden.

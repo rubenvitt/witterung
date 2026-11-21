@@ -293,6 +293,22 @@ async fn places_crud_and_validation() {
 }
 
 #[tokio::test]
+async fn new_place_is_fetched_on_first_forecast() {
+    let (s, id) = server_with_place().await;
+    // No poller run: the forecast request fetches the free sources itself.
+    let r = s
+        .get(&format!("/api/v1/places/{id}/forecast"), Auth::None)
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let f = r.json();
+    assert!(f["sources"].as_array().unwrap().iter().any(|s| s["source"]
+        .as_str()
+        .unwrap()
+        .starts_with("open_meteo")
+        && s["ok"] == true));
+}
+
+#[tokio::test]
 async fn current_location_is_snapped_fetched_and_hidden_from_places() {
     let (s, _) = server_with_place().await;
     let r = s
