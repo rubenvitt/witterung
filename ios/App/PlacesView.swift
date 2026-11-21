@@ -58,7 +58,8 @@ struct PlacesView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } }
             }
-            .sheet(isPresented: $adding) { AddPlaceView() }
+            // Gepusht statt als Sheet im Sheet.
+            .navigationDestination(isPresented: $adding) { AddPlaceView { adding = false } }
             .alert("Umbenennen", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
                 TextField("Name", text: $newName)
                 Button("Abbrechen", role: .cancel) {}
@@ -114,61 +115,132 @@ struct PlacesView: View {
     }
 }
 
-/// Ortssuche über MapKit, Ergebnis geht per POST an den Server.
+/// Ortssuche mit Vorschlägen beim Tippen (MapKit-Autovervollständigung). Der gewählte
+/// Vorschlag wird zu Koordinaten aufgelöst und per POST an den Server geschickt.
 private struct AddPlaceView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
+    let onAdded: () -> Void
+
     @State private var query = ""
-    @State private var results: [MKMapItem] = []
-    @State private var searching = false
+    @State private var search = PlaceSearch()
+    @State private var adding: MKLocalSearchCompletion?
+    @State private var error: String?
+    @FocusState private var focused: Bool
 
     var body: some View {
-        NavigationStack {
-            List(results, id: \.self) { item in
+        List {
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
+            ForEach(search.results, id: \.self) { completion in
                 Button {
-                    Task {
-                        await model.addPlace(name: item.name ?? query, coordinate: item.location.coordinate)
-                        dismiss()
-                    }
+                    Task { await add(completion) }
                 } label: {
-                    VStack(alignment: .leading) {
-                        Text(item.name ?? "").font(.headline)
-                        if let address = item.address?.shortAddress ?? item.address?.fullAddress {
-                            Text(address).font(.subheadline).foregroundStyle(.secondary)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(completion.title).font(.headline)
+                            if !completion.subtitle.isEmpty {
+                                Text(completion.subtitle).font(.subheadline).foregroundStyle(.secondary)
+                            }
                         }
+                        Spacer()
+                        if adding == completion { ProgressView() }
                     }
+                    .contentShape(Rectangle())
                 }
                 .foregroundStyle(.primary)
+                .disabled(adding != nil)
             }
-            .overlay {
-                if results.isEmpty, !query.isEmpty, !searching {
+        }
+        .overlay {
+            if search.results.isEmpty {
+                if query.trimmingCharacters(in: .whitespaces).count < 2 {
+                    ContentUnavailableView("Ort suchen", systemImage: "magnifyingglass",
+                                           description: Text("Stadt, Ortsteil oder Adresse"))
+                } else if !search.searching {
                     ContentUnavailableView.search(text: query)
-                } else if query.isEmpty {
-                    ContentUnavailableView("Ort suchen", systemImage: "magnifyingglass", description: Text("Stadt, Ortsteil oder Adresse"))
                 }
             }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Stadt oder Adresse")
-            .task(id: query) { await search() }
-            .navigationTitle("Ort hinzufügen")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
-            }
+        }
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Stadt oder Adresse")
+        .searchFocused($focused)
+        .autocorrectionDisabled()
+        .onChange(of: query) { _, text in
+            error = nil
+            search.update(text)
+        }
+        .onAppear { focused = true }
+        .navigationTitle("Ort hinzufügen")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func add(_ completion: MKLocalSearchCompletion) async {
+        adding = completion
+        defer { adding = nil }
+        error = nil
+        do {
+            let item = try await PlaceSearch.resolve(completion)
+            try await model.addPlace(name: item.name ?? completion.title, coordinate: item.location.coordinate)
+            onAdded()
+        } catch {
+            self.error = "„\(completion.title)“ ließ sich nicht hinzufügen: \(error.localizedDescription)"
+        }
+    }
+}
+
+/// Vorschläge von `MKLocalSearchCompleter`; der Completer entprellt das Tippen selbst.
+@MainActor @Observable
+final class PlaceSearch: NSObject, MKLocalSearchCompleterDelegate {
+    private(set) var results: [MKLocalSearchCompletion] = []
+    private(set) var searching = false
+    @ObservationIgnored private let completer = MKLocalSearchCompleter()
+
+    override init() {
+        super.init()
+        completer.delegate = self
+        completer.resultTypes = .address
+        // Nur ein Hinweis, Orte außerhalb Deutschlands bleiben auffindbar.
+        completer.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 51.2, longitude: 10.4),
+                                              span: MKCoordinateSpan(latitudeDelta: 8, longitudeDelta: 10))
+    }
+
+    func update(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard text.count >= 2 else {
+            completer.cancel()
+            results = []
+            searching = false
+            return
+        }
+        searching = true
+        completer.queryFragment = text
+    }
+
+    nonisolated func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        MainActor.assumeIsolated {
+            results = self.completer.results
+            searching = false
         }
     }
 
-    private func search() async {
-        let text = query.trimmingCharacters(in: .whitespaces)
-        guard text.count >= 2 else { results = []; return }
-        try? await Task.sleep(for: .milliseconds(300)) // tippen lassen
-        guard !Task.isCancelled else { return }
-        searching = true
-        defer { searching = false }
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = text
-        request.resultTypes = .address
-        request.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 51.2, longitude: 10.4),
-                                            span: MKCoordinateSpan(latitudeDelta: 8, longitudeDelta: 10))
-        results = (try? await MKLocalSearch(request: request).start().mapItems) ?? []
+    nonisolated func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: any Error) {
+        // „Nichts gefunden“ kommt als Fehler; die Ansicht zeigt dann „Keine Ergebnisse“.
+        MainActor.assumeIsolated {
+            results = []
+            searching = false
+        }
+    }
+
+    /// Koordinaten zu einem Vorschlag.
+    static func resolve(_ completion: MKLocalSearchCompletion) async throws -> MKMapItem {
+        let response = try await MKLocalSearch(request: MKLocalSearch.Request(completion: completion)).start()
+        guard let item = response.mapItems.first else { throw NotFound() }
+        return item
+    }
+
+    struct NotFound: LocalizedError {
+        var errorDescription: String? { "Zu diesem Vorschlag kennt Apple Karten keine Koordinaten." }
     }
 }

@@ -118,8 +118,10 @@ sobald WeatherKit aktiv ist).
 
 Warum über den Server: Der DWD-GeoServer rendert jede GetMap-Anfrage neu und braucht dafür
 5–30 s, auch für eine kleine Kachel. Der Server holt deshalb ein Bild je Zeitpunkt, hält alle
-Zeitpunkte im Speicher und lädt sie (6 parallel, vom letzten Analysebild nach außen) vor,
-solange in den letzten 15 min jemand das Radar geöffnet hat. Vorhersagebilder gehören zu
+Zeitpunkte im Speicher und lädt sie (6 parallel, vom letzten Analysebild nach außen) ständig
+vor, die Warnkarte alle 5 min dazu; so öffnet das Radar ohne Wartezeit. Der GeoServer ist
+offen und ohne Schlüssel oder Kontingent; je neuem Analysebild (alle 5 min) sind es ein
+Messbild und die 24 Bilder des neuen Vorhersagelaufs, ≈ 300 Abrufe pro Stunde. Vorhersagebilder gehören zu
 ihrem Lauf und werden mit dem nächsten Lauf neu geholt. `wms`/`layer` bleiben für Clients,
 die selbst Kacheln holen. Quelle: Deutscher Wetterdienst.
 
