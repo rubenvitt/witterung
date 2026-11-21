@@ -4,11 +4,11 @@
 //! however small. A map built from 256-px tiles therefore stayed empty for
 //! half a minute, and every frame of the time slider started over. So the
 //! server fetches one image per frame for all of Germany, keeps it in memory
-//! and fetches the frames ahead while someone looks at the radar. Clients lay
-//! the image over their map at `bbox` (EPSG:3857).
+//! and keeps all frames of the current plan fetched in the background, so the
+//! radar opens without waiting. Clients lay the image over their map at
+//! `bbox` (EPSG:3857).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -47,9 +47,6 @@ pub struct RadarCache {
     frames: Mutex<HashMap<Key, Arc<OnceCell<Bytes>>>>,
     warnings: tokio::sync::Mutex<Option<(Timestamp, Bytes)>>,
     end: Mutex<Option<(Timestamp, i64)>>,
-    /// Last request for radar data (seconds); the prefetch runs only while
-    /// someone looks.
-    last_seen: AtomicI64,
 }
 
 /// The current frames: 5-minute steps, `SPAN` back from the last analysis
@@ -222,29 +219,26 @@ fn prune(app: &App, plan: &Plan) {
         .retain(|k, _| keep.contains(k));
 }
 
-fn touch(app: &App) {
-    cache(app)
-        .last_seen
-        .store(Timestamp::now().as_second(), Ordering::Relaxed);
-}
-
 /// Parallel downloads; the DWD does not slow them down (measured with 6).
 const PARALLEL: usize = 6;
-/// The prefetch stops this long after the last radar request.
-const IDLE: i64 = 15 * 60;
 
-/// Keeps the frames of the current plan in memory while the radar is in use.
+/// Keeps the frames of the current plan and the warnings in memory, all the
+/// time: the DWD GeoServer is open data without a key or quota, and a radar
+/// that waits 30 s for its first image is the problem this module solves.
+/// Per new analysis (every 5 min) that is one measured frame plus the 24
+/// frames of the new forecast run, ≈ 300 requests an hour.
 pub fn spawn_prefetch(app: App) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(60));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
-            let seen = cache(&app).last_seen.load(Ordering::Relaxed);
-            if Timestamp::now().as_second() - seen > IDLE {
-                continue;
-            }
-            prefetch(&app).await;
+            let warnings = async {
+                if let Err(e) = warnings(&app).await {
+                    tracing::warn!(error = %e, "warnings prefetch");
+                }
+            };
+            tokio::join!(prefetch(&app), warnings);
         }
     });
 }
@@ -278,7 +272,6 @@ pub async fn prefetch(app: &App) {
 
 /// `GET /api/v1/radar`
 pub async fn radar(State(app): State<App>) -> Json<Value> {
-    touch(&app);
     let plan = plan(&app).await;
     // Start the downloads now, not with the next tick.
     {
@@ -327,7 +320,6 @@ fn png(body: Bytes, max_age: u32) -> Response {
 
 /// `GET /api/v1/radar/frames/{unix}`: the image of one frame (PNG, `bbox`).
 pub async fn frame_image(State(app): State<App>, Path(t): Path<i64>) -> AppResult<Response> {
-    touch(&app);
     let plan = plan(&app).await;
     if !plan.frames.contains(&t) {
         return Err(AppError::NotFound);
@@ -341,23 +333,29 @@ pub async fn frame_image(State(app): State<App>, Path(t): Path<i64>) -> AppResul
 /// `GET /api/v1/radar/warnings`: current DWD warnings as areas (PNG, `bbox`),
 /// cached for 5 minutes.
 pub async fn warnings_image(State(app): State<App>) -> AppResult<Response> {
-    let mut cached = cache(&app).warnings.lock().await;
+    let (body, max_age) = warnings(&app).await?;
+    Ok(png(body, max_age))
+}
+
+/// The warnings image and its max-age, fetched at most every 5 minutes.
+async fn warnings(app: &App) -> AppResult<(Bytes, u32)> {
+    let mut cached = cache(app).warnings.lock().await;
     let now = Timestamp::now();
     if let Some((at, body)) = cached.as_ref() {
         if now.duration_since(*at) < SignedDuration::from_mins(5) {
-            return Ok(png(body.clone(), 300));
+            return Ok((body.clone(), 300));
         }
     }
-    match fetch(&app, WARNINGS_LAYER, None).await {
+    match fetch(app, WARNINGS_LAYER, None).await {
         Ok(body) => {
             *cached = Some((now, body.clone()));
-            Ok(png(body, 300))
+            Ok((body, 300))
         }
         // An older picture is better than none.
         Err(e) => match cached.as_ref() {
             Some((_, body)) => {
                 tracing::warn!(error = %e, "warnings image");
-                Ok(png(body.clone(), 60))
+                Ok((body.clone(), 60))
             }
             None => Err(e),
         },

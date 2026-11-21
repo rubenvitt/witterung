@@ -226,17 +226,20 @@ final class AppModel {
 
     // MARK: Orte
 
-    func addPlace(name: String, coordinate: CLLocationCoordinate2D) async {
+    /// Wirft, damit die Suche den Fehler selbst zeigt: Der Alert der Startansicht
+    /// erscheint nicht, solange die Ortsliste offen ist.
+    func addPlace(name: String, coordinate: CLLocationCoordinate2D) async throws {
+        let place: Place
         do {
-            let place = try await api.addPlace(name: name, lat: coordinate.latitude, lon: coordinate.longitude)
-            places.append(place)
-            placesChanged()
-            selection = .saved(place.id)
-            await refresh(.saved(place.id))
+            place = try await api.addPlace(name: name, lat: coordinate.latitude, lon: coordinate.longitude)
         } catch {
-            message = error.localizedDescription
             handle(error)
+            throw error
         }
+        places.append(place)
+        placesChanged()
+        selection = .saved(place.id)
+        Task { await refresh(.saved(place.id)) }
     }
 
     func rename(_ place: Place, to name: String) async {

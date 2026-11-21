@@ -30,6 +30,9 @@ struct WitterungApp: App {
                 #endif
             }
             .environment(model)
+            // Die App ist durchgehend dunkel gestaltet; auch Sheets (Orte, Suche, Einstellungen)
+            // sollen nicht dem hellen Systemmodus folgen.
+            .preferredColorScheme(.dark)
             .environment(\.locale, Fmt.locale)
             .environment(\.timeZone, Fmt.timeZone)
             .environment(\.calendar, Fmt.calendar)
