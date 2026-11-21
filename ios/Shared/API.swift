@@ -56,17 +56,18 @@ struct API: Sendable {
         _ = try await send("DELETE", "/api/v1/places/\(id)")
     }
 
-    /// Liefert die Vorhersage und die rohen Bytes für den Cache.
+    /// Liefert die Vorhersage und die rohen Bytes für den Cache. Für einen neuen Ort fragt der
+    /// Server die Quellen erst während der Anfrage ab, daher die längere Zeitüberschreitung.
     func forecast(_ ref: PlaceRef, lat: Double? = nil, lon: Double? = nil) async throws -> (Forecast, Data) {
         let data: Data
         switch ref {
         case let .saved(id):
-            data = try await send("GET", "/api/v1/places/\(id)/forecast")
+            data = try await send("GET", "/api/v1/places/\(id)/forecast", timeout: 45)
         case .current:
             // Auf 0,02° gerundet fragt der Server ohnehin ab; hier reichen vier Stellen.
             let query = [URLQueryItem(name: "lat", value: String(format: "%.4f", lat ?? 0)),
                          URLQueryItem(name: "lon", value: String(format: "%.4f", lon ?? 0))]
-            data = try await send("GET", "/api/v1/forecast", query: query)
+            data = try await send("GET", "/api/v1/forecast", query: query, timeout: 45)
         }
         return (try JSONDecoder.api.decode(Forecast.self, from: data), data)
     }
