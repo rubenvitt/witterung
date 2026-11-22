@@ -14,7 +14,17 @@ pub fn health_url(bind: SocketAddr) -> String {
     format!("http://{}/health", SocketAddr::new(ip, bind.port()))
 }
 
-/// Whether the server at `bind` answers `/health` with status `ok`.
+/// Whether a `/health` body counts as healthy for Docker. `degraded` (an
+/// upstream source delivers nothing, e.g. Bright Sky's daily cap is used
+/// up) still counts: the server answers and serves the last data. An
+/// unhealthy container is dropped by Traefik, so a single failing source
+/// would otherwise take the whole service (app, web, MCP) offline.
+pub fn is_healthy(body: &serde_json::Value) -> bool {
+    matches!(body["status"].as_str(), Some("ok" | "degraded"))
+}
+
+/// Whether the server at `bind` answers `/health` with status `ok` or
+/// `degraded` (see [`is_healthy`]).
 pub async fn check(bind: SocketAddr) -> Result<(), String> {
     let url = health_url(bind);
     let client = reqwest::Client::builder()
@@ -27,7 +37,7 @@ pub async fn check(bind: SocketAddr) -> Result<(), String> {
         return Err(format!("{url} antwortet mit {}", response.status()));
     }
     let body: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-    if body["status"] == "ok" {
+    if is_healthy(&body) {
         Ok(())
     } else {
         Err(format!("{url} meldet {body}"))
@@ -37,6 +47,15 @@ pub async fn check(bind: SocketAddr) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn degraded_counts_as_healthy() {
+        use serde_json::json;
+        assert!(is_healthy(&json!({"status": "ok"})));
+        assert!(is_healthy(&json!({"status": "degraded", "sources": []})));
+        assert!(!is_healthy(&json!({"status": "error"})));
+        assert!(!is_healthy(&json!({})));
+    }
 
     #[test]
     fn url_for_bind_address() {
