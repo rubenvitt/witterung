@@ -46,7 +46,7 @@ Oberfläche geht dasselbe auf dem Server: `docker exec witterung witterung devic
 
 `GET /api/v1/places/{id}/forecast` – gespeicherter Ort.
 `GET /api/v1/forecast?lat=…&lon=…` – aktueller Standort. Der Server rundet auf 0,02° und
-fragt den Punkt 24 h lang mit ab. Gibt es noch keine Daten, holt er Open-Meteo und Bright Sky
+fragt den Punkt 24 h lang mit ab (Messwerte, Warnungen und Radar-Nowcast nur 2 h lang). Gibt es noch keine Daten, holt er Open-Meteo und Bright Sky
 sofort (dauert wenige Sekunden).
 
 ```jsonc

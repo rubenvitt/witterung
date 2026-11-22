@@ -139,6 +139,15 @@ impl Provider {
         }
     }
 
+    /// The 10/15-minute DWD feeds. They share Bright Sky's daily cap with
+    /// MOSMIX and make up 16 of a place's 17 calls an hour.
+    pub fn is_live_feed(self) -> bool {
+        matches!(
+            self,
+            Provider::DwdObservation | Provider::DwdAlerts | Provider::DwdRadar
+        )
+    }
+
     /// Weighted calls per request.
     pub fn weight(self) -> f64 {
         match self {
@@ -260,6 +269,15 @@ pub fn spawn(app: App) {
 
 /// Current-location places are polled while requested within this window.
 pub const CURRENT_ACTIVE: SignedDuration = SignedDuration::from_hours(24);
+/// … but the live feeds (observation, alerts, radar) only within this one,
+/// or while a Live Activity follows the place. Every location looked up
+/// (moving device, MCP queries) is its own place; at full rate a few dozen
+/// of them used up Bright Sky's daily cap and starved MOSMIX.
+pub const CURRENT_LIVE: SignedDuration = SignedDuration::from_hours(2);
+
+/// Share of a quota the live feeds may not touch, so MOSMIX (hourly) still
+/// gets its calls when the feeds use a lot.
+pub const LIVE_FEED_RESERVE: f64 = 0.2;
 
 /// One round over all places and providers (sequential: a hanging
 /// upstream delays the others by at most the HTTP timeout), then push
@@ -272,12 +290,32 @@ pub async fn poll_once(app: &App, now: Timestamp) {
             return;
         }
     };
+    let live_places: Vec<i64> = match app.blocking(db::live_registrations).await {
+        Ok(regs) => regs.into_iter().filter_map(|r| r.place_id).collect(),
+        Err(e) => {
+            tracing::error!(error = %e, "poller: cannot list live registrations");
+            Vec::new()
+        }
+    };
     let active_since = (now - CURRENT_ACTIVE).as_millisecond();
-    for place in places
-        .iter()
-        .filter(|p| p.kind == "saved" || p.last_requested_at.unwrap_or(0) >= active_since)
-    {
-        poll_place(app, place, &Provider::ALL, now).await;
+    let live_since = (now - CURRENT_LIVE).as_millisecond();
+    let forecasts: Vec<Provider> = Provider::ALL
+        .into_iter()
+        .filter(|p| !p.is_live_feed())
+        .collect();
+    for place in places.iter() {
+        let requested = place.last_requested_at.unwrap_or(0);
+        let providers: &[Provider] = if place.kind == "saved"
+            || requested >= live_since
+            || live_places.contains(&place.id)
+        {
+            &Provider::ALL
+        } else if requested >= active_since {
+            &forecasts
+        } else {
+            continue;
+        };
+        poll_place(app, place, providers, now).await;
     }
     if let Err(e) = crate::push::evaluate(app, now).await {
         tracing::error!(error = %e, "push check failed");
@@ -326,6 +364,11 @@ async fn poll(
         return Ok(());
     }
     let (budget, weight, account) = (provider.budget(), provider.weight(), provider.quota_key());
+    let budget = if provider.is_live_feed() {
+        budget.reserving(LIVE_FEED_RESERVE)
+    } else {
+        budget
+    };
     let booked = app
         .blocking(move |c| quota::try_spend(c, account, budget, weight, now))
         .await?;

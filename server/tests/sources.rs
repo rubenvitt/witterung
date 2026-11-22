@@ -422,3 +422,69 @@ async fn credential_sources_poll_when_configured() {
         .json();
     assert_eq!(f["attribution"].as_array().unwrap().len(), 4);
 }
+
+/// A location that was looked up hours ago stays in the forecast round for
+/// 24 h, but no longer pulls the 10-minute DWD feeds: those share Bright
+/// Sky's daily cap with MOSMIX and used it up with a few dozen such places.
+#[tokio::test]
+async fn idle_current_place_polls_only_forecasts() {
+    let base = mock_upstreams().await;
+    let s = TestServer::with_config(|c| {
+        c.dev_auth = true;
+        c.endpoints.open_meteo = base.join("om/").unwrap();
+        c.endpoints.bright_sky = base.join("bs/").unwrap();
+    });
+    let r = s
+        .get("/api/v1/forecast?lat=52.97&lon=10.56", Auth::None)
+        .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.text());
+    let place = s
+        .app
+        .blocking(witterung::db::list_places)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|p| p.kind == "current")
+        .unwrap();
+    let attempt = |provider: &'static str| {
+        let app = s.app.clone();
+        async move {
+            app.blocking(move |c| witterung::db::fetch_state(c, place.id, provider))
+                .await
+                .unwrap()
+                .last_attempt_at
+        }
+    };
+    let radar_before = attempt("dwd_radar").await;
+    let mosmix_before = attempt("bright_sky").await;
+    assert!(radar_before.is_some(), "first request fetches the feeds");
+
+    // Three hours later, not requested since.
+    poll_once(&s.app, Timestamp::now() + SignedDuration::from_hours(3)).await;
+    for feed in ["dwd_radar", "dwd_alerts", "dwd_observation"] {
+        let before = if feed == "dwd_radar" {
+            radar_before
+        } else {
+            attempt(feed).await
+        };
+        assert_eq!(
+            attempt(feed).await,
+            before,
+            "{feed} polled for an idle place"
+        );
+    }
+    assert_ne!(
+        attempt("bright_sky").await,
+        mosmix_before,
+        "MOSMIX still polled"
+    );
+    assert_ne!(attempt("open_meteo").await, None);
+
+    // Requested again: the feeds come back with the next round.
+    let r = s
+        .get("/api/v1/forecast?lat=52.97&lon=10.56", Auth::None)
+        .await;
+    assert_eq!(r.status, StatusCode::OK);
+    poll_once(&s.app, Timestamp::now() + SignedDuration::from_mins(20)).await;
+    assert_ne!(attempt("dwd_radar").await, radar_before);
+}
