@@ -80,6 +80,12 @@ bestimmt und stimmt immer.
 | `weatherkit` | 15 min | 500.000/Monat | 250.000/Monat | 1 |
 | `pirate_weather` | 60 min | 10.000/Monat | 5.000/Monat | 1 |
 
+Die DWD-Feeds `dwd_observation` (15 min), `dwd_alerts` und `dwd_radar` (je 10 min) laufen über
+das `bright_sky`-Konto mit, dürfen aber nur 80 % von dessen Grenze buchen: Der Rest bleibt für
+MOSMIX. Orte der Art `current` (Standort, Koordinaten-Abfragen) fragen diese Feeds nur ab,
+solange sie in den letzten 2 h angefragt wurden oder eine Live-Aktivität ihnen folgt; danach
+bis 24 h nur noch die stündlichen Vorhersagen.
+
 Perioden in UTC. Gebucht wird vor dem Abruf; Fehlversuche zählen mit. Nach einem Fehler
 Backoff 1, 2, 4 … min, höchstens bis zum Takt. Der Abrufzustand liegt in SQLite, ein Neustart
 löst keinen Abruf aus.

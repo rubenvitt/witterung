@@ -25,6 +25,14 @@ impl Budget {
     pub fn limit(&self) -> f64 {
         self.quota / 2.0
     }
+
+    /// The same budget with `share` of it kept free for other callers.
+    pub fn reserving(self, share: f64) -> Self {
+        Budget {
+            quota: self.quota * (1.0 - share),
+            ..self
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
@@ -111,6 +119,27 @@ mod tests {
         assert_eq!(usage(&conn, "x", budget, day1).unwrap().used, 5.0);
         assert!(try_spend(&conn, "x", budget, 1.0, day2).unwrap());
         assert!(try_spend(&conn, "other", budget, 5.0, day1).unwrap());
+    }
+
+    #[test]
+    fn reserve_leaves_room_for_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = crate::db::open(&dir.path().join("q.db")).unwrap();
+        let budget = Budget {
+            quota: 10.0,
+            period: Period::Day,
+        };
+        let now: Timestamp = "2026-11-22T08:00:00Z".parse().unwrap();
+        let feeds = budget.reserving(0.2);
+        assert!(try_spend(&conn, "x", feeds, 4.0, now).unwrap());
+        assert!(
+            !try_spend(&conn, "x", feeds, 1.0, now).unwrap(),
+            "reserve is not theirs"
+        );
+        assert!(
+            try_spend(&conn, "x", budget, 1.0, now).unwrap(),
+            "but the others' to use"
+        );
     }
 
     #[test]
